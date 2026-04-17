@@ -1,0 +1,189 @@
+import os, sys
+from os.path import join as joinpath
+from SCons.Script import *
+
+useIcc = False
+defaultBuildDir = "build/"
+march = "native"
+
+buildFlags = {
+    "debug": "-g -ggdb -O0",
+    "opt": f"-march={march} -g -O3 -funroll-loops",
+    "release": f"-march={march} -O3 -DNASSERT -funroll-loops -fweb"
+}
+
+
+# ============= HELPER FUNCTIONS ===============
+def get_env_var(var, required=True):
+    if var in os.environ:
+        return os.environ[var]
+    if required:
+        print(f"ERROR: Environment variable '{var}' is required")
+        sys.exit(1)
+    return None
+
+def configure_pin_paths(env, pinpath):
+    pinIncl = joinpath(pinpath, "source/include")
+    if not os.path.exists(joinpath(pinIncl, "pin.H")):
+        pinIncl = joinpath(pinIncl, "pin")
+        assert os.path.exists(joinpath(pinIncl, "pin.H"))
+    xedName = "xed2"
+    xedPath = joinpath(pinpath, f"extras/{xedName}-intel64/include")
+    if not os.path.exists(xedPath):
+        xedName = "xed"
+        xedPath = joinpath(pinpath, f"extras/{xedName}-intel64/include")
+        assert os.path.exists(xedPath)
+    env.Append(CPPPATH=[
+        ".", xedPath, pinIncl, joinpath(pinIncl, "gen"),
+        joinpath(pinpath, "extras/components/include")
+    ])
+    env.Append(PINLINKFLAGS=[
+        "-Wl,--hash-style=sysv", "-Wl,-Bsymbolic",
+        f"-Wl,--version-script={joinpath(pinIncl, 'pintool.ver')}"
+    ])
+    env.Append(PINLIBPATH=[
+        "/usr/lib", "/usr/lib/x86_64-linux-gnu",
+        joinpath(pinpath, f"extras/{xedName}-intel64/lib"),
+        joinpath(pinpath, "intel64/lib"),
+        joinpath(pinpath, "intel64/lib-ext")
+    ])
+    pindwarf = joinpath(pinpath, "intel64/lib-ext/libdwarf.a")
+    env.Append(PINLIBS=["pin", "xed", pindwarf if os.path.exists(pindwarf) else "pindwarf", "elf", "dl", "rt"])
+
+def configure_optional_libs(env):
+    optional = {
+        "POLARSSLPATH": ("polarssl", "-D_WITH_POLARSSL_=1"),
+        "DRAMSIMPATH": ("dramsim", "-D_WITH_DRAMSIM_=1"),
+        "DRAMSIM3PATH": ("dramsim3", "-D_WITH_DRAMSIM3_=1"),
+        "RAMULATORPATH": ("ramulator", "-D_WITH_RAMULATOR_=1"),
+        "RAMULATOR2PATH": ("ramulator2", "-D_WITH_RAMULATOR2_=1")
+    }
+    # RAMULATOR and RAMULATOR2 cannot both be defined as active at compile time.
+    # When both paths are set, suppress RAMULATOR2's compile-time flag so the
+    # build succeeds; the per-experiment sb.cfg selects which backend is active
+    # at runtime, and both libraries are still linked for portability stages.
+    ram1_set = bool(os.environ.get("RAMULATORPATH"))
+    ram2_set = bool(os.environ.get("RAMULATOR2PATH"))
+    suppress_ram2_define = ram1_set and ram2_set
+
+    for var, (libname, define) in optional.items():
+        path = os.environ.get(var)
+        if not path: continue
+        extra_includes = []
+        if var == "RAMULATORPATH":
+            extra_includes = [joinpath(path, "ramulator")]
+        elif var == "RAMULATOR2PATH":
+            extra_includes = [
+                joinpath(path, "src"),
+                joinpath(path, "ext", "yaml-cpp", "include"),
+                joinpath(path, "ext", "spdlog", "include"),
+                joinpath(path, "ext", "argparse", "include"),
+            ]
+        env.Append(CPPPATH=[path, joinpath(path, "include"), joinpath(path, "src")] + extra_includes)
+        lib_paths = [path, joinpath(path, "library")]
+        if var == "RAMULATORPATH":
+            lib_paths += [joinpath(path, "ramulator")]
+        elif var == "DRAMSIM3PATH":
+            pass  # libdramsim3.so is output directly to $DRAMSIM3PATH/ by cmake
+        elif var == "RAMULATOR2PATH":
+            pass  # libramulator2.so is output directly to $RAMULATOR2PATH/ by cmake (LIBRARY_OUTPUT_DIRECTORY=PROJECT_SOURCE_DIR)
+        env.Append(PINLIBPATH=lib_paths)
+        rpath_dirs = [path]
+        if var == "RAMULATORPATH":
+            rpath_dirs += [joinpath(path, "ramulator")]
+        env.Append(LINKFLAGS=[f"-Wl,-R{d}" for d in rpath_dirs])
+        env.Append(PINLIBS=[libname])
+        if var == "RAMULATOR2PATH" and suppress_ram2_define:
+            continue  # include/link ramulator2 but don't define _WITH_RAMULATOR2_=1
+        env.Append(CPPFLAGS=[define])
+
+def configure_hdf5(env):
+    env.Append(PINLIBS=["hdf5", "hdf5_hl"])
+    home = os.environ.get("HDF5_HOME")
+    if home:
+        libp = joinpath(home, "lib")
+        env.Append(LINKFLAGS=[f"-L{libp}", f"-Wl,-rpath,{libp}"])
+        env.Append(CPPFLAGS=[f"-I{joinpath(home, 'include')}"])
+
+def configure_pgo(env, pgo):
+    if pgo == "generate":
+        flag = "-prof-gen" if useIcc else "-fprofile-generate"
+    elif pgo == "use":
+        flag = "-prof-use" if useIcc else "-fprofile-use -fprofile-correction"
+    else:
+        return
+    env.Append(PINCPPFLAGS=[flag])
+    env.Append(PINLINKFLAGS=[flag])
+
+
+def buildSim(cppFlags, baseDir, mode, pgo=None):
+    buildDir = joinpath(baseDir, mode)
+    print(f"Building {mode} zsim at {buildDir}")
+    env = Environment(ENV=os.environ, tools=["default", "textfile"])
+    env.Append(CPPFLAGS=cppFlags.split())
+    env.Append(CPPFLAGS=[
+        "-g", "-std=c++17", "-Wall", "-Wno-unknown-pragmas",
+        "-fomit-frame-pointer", "-fno-stack-protector",
+        "-MMD", "-DBIGARRAY_MULTIPLIER=1", "-DUSING_XED",
+        "-DTARGET_IA32E", "-DHOST_IA32E", "-fPIC", "-DTARGET_LINUX",
+        "-fabi-version=2", "-D_GLIBCXX_USE_CXX11_ABI=0"
+    ])
+    if useIcc:
+        env["CC"], env["CXX"] = "icc", "icpc -ipo"
+    versionFile = joinpath(buildDir, "version.h")
+    allSrcs = [f for d, _, _ in os.walk("src") for f in Glob(f"{d}/*")]
+    cmd = (f'printf "#define ZSIM_BUILDDATE \\"`date`\\"\\n'
+           '#define ZSIM_BUILDVERSION \\"`python misc/gitver.py`\\"" >>' + versionFile)
+    deps = allSrcs + ([".git/index", "SConstruct"] if os.path.exists(".git") else ["SConstruct"])
+    env.Command(versionFile, deps, cmd)
+    pinpath = get_env_var("PINPATH")
+    configure_pin_paths(env, pinpath)
+    configure_optional_libs(env)
+    configure_hdf5(env)
+    env.Append(PINCPPFLAGS=["-DMT_SAFE_LOG"])
+    env.Append(CPPFLAGS=[
+        f'-DPIN_PATH="{joinpath(pinpath, "intel64/bin/pinbin")}"',
+        f'-DZSIM_PATH="{joinpath(Dir(".").abspath, buildDir, "libzsim.so")}"'
+    ])
+    env.Append(LIBPATH=[])
+    env.Append(LIBS=["config++"])
+    if useIcc:
+        env.Append(LINKFLAGS=["-Wl,-R/data/sanchez/tools/intel/composer_xe_2013.1.117/compiler/lib/intel64/"])
+    configure_pgo(env, pgo)
+    env.SConscript("src/SConscript", variant_dir=buildDir, exports={"env": env.Clone()})
+
+
+# — Command-line options & build flow
+AddOption("--buildDir",  dest="buildDir",  type="string", default=defaultBuildDir, nargs=1)
+AddOption("--d",         dest="debugBuild", action="store_true", default=False)
+AddOption("--o",         dest="optBuild",   action="store_true", default=False)
+AddOption("--r",         dest="releaseBuild", action="store_true", default=False)
+AddOption("--p",         dest="pgoBuild",   action="store_true", default=False)
+AddOption("--pgoPhase",  dest="pgoPhase",   type="string", default="none")
+
+baseDir = GetOption("buildDir")
+types = []
+if GetOption("debugBuild"):   types.append("debug")
+if GetOption("releaseBuild"): types.append("release")
+if GetOption("optBuild") or not types: types.append("opt")
+
+pgoPhase = GetOption("pgoPhase")
+if GetOption("pgoBuild"):
+    for t in types:
+        print("Building PGO binary")
+        cfgs = [f for f in os.listdir("tests") if f.startswith("pgo")]
+        base = joinpath(baseDir, f"pgo-{t}")
+        gen = f"scons -j16 --pgoPhase=generate-{t}"
+        runs = [f"mkdir -p pgo-tmp && cd pgo-tmp && ../{base}/zsim ../tests/{c} && cd .." for c in cfgs]
+        use = f"scons -j16 --pgoPhase=use-{t}"
+        Environment(ENV=os.environ).Command(f"dummyTgt-{t}", [], " && ".join([gen] + runs + [use]))
+elif pgoPhase.startswith("generate"):
+    typ = pgoPhase.split("-")[1]
+    buildSim(buildFlags[typ], baseDir, f"pgo-{typ}", "generate")
+elif pgoPhase.startswith("use"):
+    typ = pgoPhase.split("-")[1]
+    buildSim(buildFlags[typ], baseDir, f"pgo-{typ}", "use")
+    Depends(Glob(joinpath(baseDir, f"pgo-{typ}", "*.os")), "pgo-tmp/zsim.out")
+else:
+    for t in types:
+        buildSim(buildFlags[t], baseDir, t)

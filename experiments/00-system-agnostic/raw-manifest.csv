@@ -1,0 +1,2 @@
+artifact_role,relative_path,origin,download_url,sha256,note
+raw-experiment-archive,00-system-agnostic.tar.gz,not-packaged,,,Structural provenance stage only; no external raw archive is published for 00-system-agnostic.

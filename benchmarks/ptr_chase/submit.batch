@@ -1,0 +1,15 @@
+#!/bin/bash
+
+
+export OMP_NUM_THREADS=23
+
+
+time ../../../simulator-source/zsim-bsc/build/release/zsim sb.cfg
+
+
+
+
+
+
+
+

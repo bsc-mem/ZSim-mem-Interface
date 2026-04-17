@@ -1,0 +1,28 @@
+# scons build files and dirs
+build/*
+ext/*
+.sconsign.dblite
+
+# output data files
+heartbeat
+*.h5
+*.out
+pin.log
+out.cfg
+**/dramsim3epoch.json
+
+dockerfiles
+tests
+
+build-zsim
+build-zsim-base-debug
+
+dif.txt
+
+argparse
+dramsim3_output
+.vscode
+pintool.log
+build-zsim.sh
+
+.zsim-env

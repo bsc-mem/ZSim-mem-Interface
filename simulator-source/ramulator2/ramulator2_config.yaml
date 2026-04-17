@@ -1,0 +1,28 @@
+Frontend:
+  impl: Zsim
+  num_cores: 24
+
+MemorySystem:
+  impl: GenericDRAM
+  clock_ratio: 1
+
+  DRAM:
+    impl: DDR4
+    org:
+      preset: DDR4_4Gb_x8
+      channel: 1
+      rank: 2
+    timing:
+      preset: DDR4_2666V
+
+  Controller:
+    impl: Generic
+    Scheduler:
+      impl: FRFCFS
+    RefreshManager:
+      impl: AllBank
+    RowPolicy:
+      impl: OpenRowPolicy
+
+  AddrMapper:
+    impl: Skylake

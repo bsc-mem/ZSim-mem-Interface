@@ -1,0 +1,8 @@
+build/
+.vscode
+ext/
+ramulator2
+*.so
+autobuild.sh
+build-debug/
+build-release/
