@@ -72,9 +72,10 @@ class DRAMsim3AccEvent : public TimingEvent
     }
 };
 
-DRAMsim3Memory::DRAMsim3Memory(std::string& ConfigName, std::string& OutputDir, g_vector<IBoundMemLatencyEstimator*> _estimators,
-    int cpuFreqMHz, uint32_t _domain, const g_string& _name, const bool _dump_trace /*= false */, const std::vector<uint32_t>& trackedCores /* = {} */ )
-    : name(_name), domain(_domain), estimators(_estimators), dump_trace(_dump_trace) {
+DRAMsim3Memory::DRAMsim3Memory(const g_string& name, uint32_t domain, int cpuFreqMHz,
+    const std::string& configPath, const std::string& outputDir, g_vector<IBoundMemLatencyEstimator*> estimators,
+    bool dumpTrace /*= false */, const std::vector<uint32_t>& trackedCores /* = {} */ )
+    : name(name), domain(domain), estimators(estimators), dump_trace(dumpTrace) {
 
     curCycle = 0;
     dramCycle = 0;
@@ -83,30 +84,29 @@ DRAMsim3Memory::DRAMsim3Memory(std::string& ConfigName, std::string& OutputDir, 
     lstFinished = 0;
 
     // NOTE: this will alloc DRAM on the heap and not the glob_heap, make sure only one process ever handles this
-    callBackFn = std::bind(&DRAMsim3Memory::DRAM_read_return_cb, this, std::placeholders::_1);
+    callBackFn = std::bind(&DRAMsim3Memory::onReadComplete, this, std::placeholders::_1);
 
     // For some reason you cannot "new" here because zsim seems to override this "new"
     // so we have to use the helper function to init the pointer
-    // dramCore = new dramsim3::MemorySystem(ConfigName.c_str(), OutputDir.c_str(), callBackFn, callBackFn);
-    dramCore = dramsim3::GetMemorySystem(ConfigName, OutputDir, callBackFn, callBackFn);
-    double tCK = dramCore->GetTCK();
+    // wrapper = new dramsim3::MemorySystem(configPath.c_str(), outputDir.c_str(), callBackFn, callBackFn);
+    wrapper = dramsim3::GetMemorySystem(configPath, outputDir, callBackFn, callBackFn);
+    double tCK = wrapper->GetTCK();
 
     dramPsPerClk = static_cast<uint64_t>(tCK*1000);
     cpuPsPerClk = static_cast<uint64_t>(1000000. / cpuFreqMHz);
     assert(cpuPsPerClk < dramPsPerClk);
-    domain = _domain;
     TickEvent<DRAMsim3Memory> *tickEv = new TickEvent<DRAMsim3Memory>(this, domain);
     tickEv->queue(0); // start the sim at time 0
 
     if (dump_trace) {
-        dump_trace_file.open(OutputDir + "/" + name.c_str() + ".trace");
+        dump_trace_file.open(outputDir + "/" + name.c_str() + ".trace");
         if (!dump_trace_file.is_open()) {
             panic("can't open trace dump file");
         }
     }
 
 
-    // dump_est_file.open(OutputDir + "/" + name.c_str() + "_est.txt");
+    // dump_est_file.open(outputDir + "/" + name.c_str() + "_est.txt");
     // if (!dump_est_file.is_open()) {
     //     panic("can't open est dump file");
     // }
@@ -118,18 +118,18 @@ DRAMsim3Memory::DRAMsim3Memory(std::string& ConfigName, std::string& OutputDir, 
 DRAMsim3Memory::~DRAMsim3Memory() {
     // Release any held timing events so their allocators can reclaim memory.
     for (auto& entry : inflightRequests) {
-        DRAMsim3AccEvent* ev = entry.second;
-        if (ev) {
-            ev->release();
-            ev->done(curCycle);
+        DRAMsim3AccEvent* accEv = entry.second;
+        if (accEv) {
+            accEv->release();
+            accEv->done(curCycle);
         }
     }
     inflightRequests.clear();
 
-    for (auto* ev : notQueuedRequests) {
-        if (ev) {
-            ev->release();
-            ev->done(curCycle);
+    for (auto* accEv : notQueuedRequests) {
+        if (accEv) {
+            accEv->release();
+            accEv->done(curCycle);
         }
     }
     notQueuedRequests.clear();
@@ -138,12 +138,8 @@ DRAMsim3Memory::~DRAMsim3Memory() {
         dump_trace_file.close();
     }
 
-    if (dump_est_file.is_open()) {
-        dump_est_file.close();
-    }
-
-    delete dramCore;
-    dramCore = nullptr;
+    delete wrapper;
+    wrapper = nullptr;
 }
 
 void DRAMsim3Memory::initStats(AggregateStat *parentStat)
@@ -216,10 +212,10 @@ uint64_t DRAMsim3Memory::access(MemReq &req)
         Address addr = req.lineAddr << lineBits;
         bool isWrite = (req.type == PUTX);
         // TODO: check the new
-        DRAMsim3AccEvent* memEv = new (evRec) DRAMsim3AccEvent(this, isWrite, addr, domain, req.srcId);
-        memEv->setMinStartCycle(req.cycle - 1);
-        memEv->boundLatency = estimators[req.srcId]->getMemLatency(); 
-        TimingRecord tr = {addr, req.cycle - 1, respCycle, req.type, memEv, memEv};
+        DRAMsim3AccEvent* accEv = new (evRec) DRAMsim3AccEvent(this, isWrite, addr, domain, req.srcId);
+        accEv->setMinStartCycle(req.cycle - 1);
+        accEv->boundLatency = estimators[req.srcId]->getMemLatency();
+        TimingRecord tr = {addr, req.cycle - 1, respCycle, req.type, accEv, accEv};
         evRec->pushRecord(tr);
 
         // if (req.is(MemReq::PREFETCH_NOREC)) {
@@ -238,7 +234,7 @@ uint64_t DRAMsim3Memory::access(MemReq &req)
 }
 
 // used by TickEvent
-uint32_t DRAMsim3Memory::tick(uint64_t cycle) {
+uint32_t DRAMsim3Memory::tick(uint64_t /*cycle*/) {
     // Only the master process should drive the external DRAM model
     if (procIdx != 0) return 1;
     pushInFlights();
@@ -247,7 +243,7 @@ uint32_t DRAMsim3Memory::tick(uint64_t cycle) {
     curCycle++;
 
     if (cpuPs > dramPs) {
-        dramCore->ClockTick();
+        wrapper->ClockTick();
         dramPs += dramPsPerClk;
         dramCycle++;
     }
@@ -258,55 +254,55 @@ uint32_t DRAMsim3Memory::tick(uint64_t cycle) {
     return 1;
 }
 
-void DRAMsim3Memory::enqueue(DRAMsim3AccEvent* ev, uint64_t cycle) {
+void DRAMsim3Memory::enqueue(DRAMsim3AccEvent* accEv, uint64_t /*cycle*/) {
     if (is_bound_phase) {
         is_bound_phase = false;
     }
 
-    if (dramCore->WillAcceptTransaction(ev->addr, ev->isWrite())) {
+    if (wrapper->WillAcceptTransaction(accEv->addr, accEv->isWrite())) {
         // push to dramsim3 queue 
-        dramCore->AddTransaction(ev->addr, ev->isWrite());
+        wrapper->AddTransaction(accEv->addr, accEv->isWrite());
 
-        ev->dramIssueCycle = dramCycle;
-        ev->issueCycle = curCycle;
+        accEv->dramIssueCycle = dramCycle;
+        accEv->issueCycle = curCycle;
 
         // update stats
-        coreTracker.recordIssue(ev->coreid, ev->issueCycle, ev->sCycle, ev->isWrite());
-        if (dump_trace) dumpTransaction(ev, std::to_string(ev->coreid));
+        coreTracker.recordIssue(accEv->coreid, accEv->issueCycle, accEv->sCycle, accEv->isWrite());
+        if (dump_trace) dumpTransaction(accEv, std::to_string(accEv->coreid));
 
         queueNotFull.inc(curCycle - lstFinished);
-        inflightRequests.insert(std::pair<Address, DRAMsim3AccEvent*>(ev->addr, ev));
+        inflightRequests.insert(std::pair<Address, DRAMsim3AccEvent*>(accEv->addr, accEv));
     } else {
         reissuedAccesses.inc();
-        notQueuedRequests.emplace_back(ev);
+        notQueuedRequests.emplace_back(accEv);
     }
 
-    ev->hold();
+    accEv->hold();
 }
 
-void DRAMsim3Memory::DRAM_read_return_cb(uint64_t addr) {
+void DRAMsim3Memory::onReadComplete(uint64_t addr) {
     // sanity: request should now be present among inflight
     auto it = inflightRequests.find(addr);
     assert((it != inflightRequests.end()));
 
-    DRAMsim3AccEvent* ev = it->second;
+    DRAMsim3AccEvent* accEv = it->second;
 
     lstFinished = curCycle;
-    const uint64_t lat = curCycle + 1 - ev->sCycle;
-    if (ev->isWrite()) {
+    const uint64_t lat = curCycle + 1 - accEv->sCycle;
+    if (accEv->isWrite()) {
         profWrites.inc();
         profTotalWrLat.inc(lat);
     } else {
         profReads.inc();
         profTotalRdLat.inc(lat);
-        profTotalRdLatBound.inc(ev->boundLatency);
+        profTotalRdLatBound.inc(accEv->boundLatency);
 
-        int32_t absErr = 100*((lat>ev->boundLatency)?(lat-ev->boundLatency) : (ev->boundLatency-lat));
+        int32_t absErr = 100*((lat>accEv->boundLatency)?(lat-accEv->boundLatency) : (accEv->boundLatency-lat));
 
         // std::abs(static_cast<int32_t>(lat) - static_cast<int32_t>(ev->boundLatency));
         absErr /= lat;
         // printf("Ramulator: core %d, addr 0x%lx, weave lat %u, bound lat %u, abs error %u%%\n",
-            // ev->coreid, ev->addr, lat, ev->boundLatency, absErr);
+            // accEv->coreid, accEv->addr, lat, accEv->boundLatency, absErr);
         profTotalAbsError.inc(absErr);
         profTotalAbsErrorCounter.inc();
         
@@ -314,60 +310,60 @@ void DRAMsim3Memory::DRAM_read_return_cb(uint64_t addr) {
         // reaches the queue)
 
 
-        estimators[ev->coreid]->updateModel(lat);
+        estimators[accEv->coreid]->updateModel(lat);
     }
 
-    coreTracker.recordComplete(ev->coreid, lat, curCycle + 1 - ev->issueCycle, ev->isWrite());
-    ev->release();
-    ev->done(curCycle + 1);
+    coreTracker.recordComplete(accEv->coreid, lat, curCycle + 1 - accEv->issueCycle, accEv->isWrite());
+    accEv->release();
+    accEv->done(curCycle + 1);
     inflightRequests.erase(it);
 
 }
 
-void DRAMsim3Memory::DRAM_write_return_cb(uint64_t addr) {
+void DRAMsim3Memory::onWriteComplete(uint64_t addr) {
     // Same as read for now
-    DRAM_read_return_cb(addr);
+    onReadComplete(addr);
 }
 
 void DRAMsim3Memory::pushInFlights() {
 
     int numberOfTries = 0;
     for (auto it = notQueuedRequests.begin(); it != notQueuedRequests.end();) {
-        auto* mem_ev = *it;
+        auto* accEv = *it;
         if(numberOfTries==8) {
             break;
         }
         numberOfTries++;
 
-        if (mem_ev->sCycle > curCycle || !dramCore->WillAcceptTransaction(mem_ev->addr, mem_ev->isWrite())) {
+        if (accEv->sCycle > curCycle || !wrapper->WillAcceptTransaction(accEv->addr, accEv->isWrite())) {
             ++it;
             continue;
         }
 
-        if (!mem_ev->isWrite()) { 
+        if (!accEv->isWrite()) {
             // only for reads
-            profTotalSkewLat.inc(curCycle - mem_ev->sCycle);
+            profTotalSkewLat.inc(curCycle - accEv->sCycle);
         }
 
-        mem_ev->issueCycle = curCycle;
-        mem_ev->dramIssueCycle = dramCycle;
+        accEv->issueCycle = curCycle;
+        accEv->dramIssueCycle = dramCycle;
 
-        dramCore->AddTransaction(mem_ev->addr, mem_ev->isWrite());
-        coreTracker.recordIssue(mem_ev->coreid, mem_ev->issueCycle, mem_ev->sCycle, mem_ev->isWrite());
-        inflightRequests.insert({ mem_ev->addr, mem_ev });
-        if (dump_trace) dumpTransaction(mem_ev, std::to_string(mem_ev->coreid));
+        wrapper->AddTransaction(accEv->addr, accEv->isWrite());
+        coreTracker.recordIssue(accEv->coreid, accEv->issueCycle, accEv->sCycle, accEv->isWrite());
+        inflightRequests.insert({ accEv->addr, accEv });
+        if (dump_trace) dumpTransaction(accEv, std::to_string(accEv->coreid));
 
         it = notQueuedRequests.erase(it);
     }
 }
 
 void DRAMsim3Memory::printStats() {
-    dramCore->PrintStats();
+    wrapper->PrintStats();
 }
 
-void DRAMsim3Memory::dumpTransaction(DRAMsim3AccEvent* ev, std::string tag /*= "" */) {
+void DRAMsim3Memory::dumpTransaction(DRAMsim3AccEvent* accEv, std::string tag /*= "" */) {
     std::ostringstream oss;
-    oss << "0x" << std::hex << ev->addr << (ev->isWrite() ? " WRITE " : " READ ") << std::dec << ev->dramIssueCycle;
+    oss << "0x" << std::hex << accEv->addr << (accEv->isWrite() ? " WRITE " : " READ ") << std::dec << accEv->dramIssueCycle;
     if (!tag.empty()) oss << " #[TAG]: " << tag;
     oss << std::endl;
     dump_trace_file << oss.str();

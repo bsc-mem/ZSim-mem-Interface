@@ -65,43 +65,42 @@ public:
     }
 };
 
-Ramulator::Ramulator(std::string config_file, g_vector<IBoundMemLatencyEstimator*> _estimators, unsigned num_cpus,
-    unsigned cache_line_size, uint32_t _domain, const g_string& _name, bool _pim_mode, const string& application,
-    unsigned _cpuFreq, bool _record_memory_trace, bool _networkOverhead, const std::vector<uint32_t>& trackedCores)
-    : name(_name), domain(_domain), estimators(_estimators), pim_mode(_pim_mode),
+Ramulator::Ramulator(const g_string& name, uint32_t domain, unsigned cpuFreq, const std::string& configPath,
+    g_vector<IBoundMemLatencyEstimator*> estimators, unsigned numCpus, unsigned cacheLineSize, bool pimMode,
+    const string& application, bool recordMemoryTrace, bool networkOverhead, const std::vector<uint32_t>& trackedCores)
+    : name(name), domain(domain), estimators(estimators), pim_mode(pimMode),
       statList(nullptr),
-      read_cb_func(std::bind(&Ramulator::DRAM_read_return_cb, this, std::placeholders::_1)),
-      write_cb_func(std::bind(&Ramulator::DRAM_write_return_cb, this, std::placeholders::_1))
+      read_cb_func(std::bind(&Ramulator::onReadComplete, this, std::placeholders::_1)),
+      write_cb_func(std::bind(&Ramulator::onWriteComplete, this, std::placeholders::_1))
     {
     curCycle = 0;
     dramPs = 0, cpuPs = 0;
 
-    const char* config_path = config_file.c_str();
-    std::string pathStr = zinfo->outputDir;
-    application_name = (pathStr + "/" + application).c_str();
-    const char* app_name = application_name.c_str();
+    const char* configPathCStr = configPath.c_str();
+    std::string outputDir = zinfo->outputDir;
+    std::string applicationName = outputDir + "/" + application;
+    const char* app_name = applicationName.c_str();
     statList = new Stats_ramulator::StatList();
     {
         Stats_ramulator::StatListScope guard(statList);
-        wrapper = new ramulator::RamulatorWrapper(config_path, num_cpus, cache_line_size, _pim_mode, _record_memory_trace,
-            app_name, _networkOverhead, trackedCores);
+        wrapper = new ramulator::RamulatorWrapper(configPathCStr, numCpus, cacheLineSize, pimMode, recordMemoryTrace,
+            app_name, networkOverhead, trackedCores);
     }
 
     // setup device synch tick params
-    tCK = wrapper->get_tCK();
-    cpuFreq = _cpuFreq;
-    memFreq = (1 / (tCK / 1000000)) / 1000;
-    if (pim_mode) cpuFreq = memFreq;
+    const double tCK = wrapper->get_tCK();
+    const double memFreq = (1 / (tCK / 1000000)) / 1000;
+    const double cpuFreqHz = pim_mode ? memFreq : cpuFreq;
     dramPsPerClk = static_cast<uint64_t>(tCK * 1000);
-    cpuPsPerClk = static_cast<uint64_t>(1000000. / cpuFreq);
+    cpuPsPerClk = static_cast<uint64_t>(1000000. / cpuFreqHz);
     assert(cpuPsPerClk < dramPsPerClk);
 
     TickEvent<Ramulator>* tickEv = new TickEvent<Ramulator>(this, domain);
     tickEv->queue(0); // start the sim at time 0
 
-    statList->output(pathStr + "/" + application + "_" + _name.c_str() + ".ramulator.stats");
+    statList->output(outputDir + "/" + application + "_" + this->name.c_str() + ".ramulator.stats");
     // Custom addition BEGIN: configure per-core tracker
-    coreTracker.configure(trackedCores, num_cpus);
+    coreTracker.configure(trackedCores, numCpus);
     // Custom addition END: configure per-core tracker
 }
 
@@ -170,11 +169,11 @@ uint64_t Ramulator::access(MemReq& req) {
     if (req.type != PUTS && zinfo->eventRecorders[req.srcId]) {
         bool isWrite = (req.type == PUTX);
         Address addr = req.lineAddr << lineBits;
-        RamulatorAccEvent* memEv =
+        RamulatorAccEvent* accEv =
             new (zinfo->eventRecorders[req.srcId]) RamulatorAccEvent(this, isWrite, addr, domain, req.srcId);
-        memEv->setMinStartCycle(req.cycle - 1);
-        memEv->boundLatency = estimators[req.srcId]->getMemLatency();
-        TimingRecord tr = { addr, req.cycle - 1, respCycle, req.type, memEv, memEv };
+        accEv->setMinStartCycle(req.cycle - 1);
+        accEv->boundLatency = estimators[req.srcId]->getMemLatency();
+        TimingRecord tr = { addr, req.cycle - 1, respCycle, req.type, accEv, accEv };
         zinfo->eventRecorders[req.srcId]->pushRecord(tr);
         respCycle += estimators[req.srcId]->getMemLatency();
     }
@@ -182,15 +181,15 @@ uint64_t Ramulator::access(MemReq& req) {
     return respCycle;
 }
 
-ramulator::Request Ramulator::getRequestFromAccEvent(RamulatorAccEvent* ev) {
-    auto addr = static_cast<long>(ev->addr);
-    auto coreId = ev->coreid;
-    auto req_type = ev->isWrite() ? ramulator::Request::Type::WRITE : ramulator::Request::Type::READ;
-    auto callback = ev->isWrite() ? write_cb_func : read_cb_func;
+ramulator::Request Ramulator::getRequestFromAccEvent(RamulatorAccEvent* accEv) {
+    auto addr = static_cast<long>(accEv->addr);
+    auto coreId = accEv->coreid;
+    auto req_type = accEv->isWrite() ? ramulator::Request::Type::WRITE : ramulator::Request::Type::READ;
+    auto callback = accEv->isWrite() ? write_cb_func : read_cb_func;
     return ramulator::Request(addr, req_type, callback, coreId);
 }
 
-uint32_t Ramulator::tick(uint64_t cycle) {
+uint32_t Ramulator::tick(uint64_t /*cycle*/) {
     Stats_ramulator::StatListScope statsGuard(statList);
     // Only the master process should drive the external DRAM model
     if (procIdx != 0) return 1;
@@ -223,29 +222,29 @@ void Ramulator::finish() {
     }
 }
 
-void Ramulator::enqueue(RamulatorAccEvent* ev, uint64_t cycle) {
+void Ramulator::enqueue(RamulatorAccEvent* accEv, uint64_t /*cycle*/) {
     Stats_ramulator::StatListScope statsGuard(statList);
     if (isBoundPhase) {
         isBoundPhase = false;
     }
 
-    auto req = getRequestFromAccEvent(ev);
+    auto backendReq = getRequestFromAccEvent(accEv);
 
-    if (!wrapper->send(req)) {
+    if (!wrapper->send(backendReq)) {
         reissuedAccesses.inc();
-        notQueuedRequests.emplace_back(ev);
+        notQueuedRequests.emplace_back(accEv);
     } else {
-        ev->issueCycle = curCycle;
-        ev->dramIssueCycle = dramCycle;
-        coreTracker.recordIssue(ev->coreid, ev->issueCycle, ev->sCycle, ev->isWrite());
+        accEv->issueCycle = curCycle;
+        accEv->dramIssueCycle = dramCycle;
+        coreTracker.recordIssue(accEv->coreid, accEv->issueCycle, accEv->sCycle, accEv->isWrite());
 
-        inflightRequests.insert({ req._addr, ev });
+        inflightRequests.insert({ backendReq._addr, accEv });
     }
 
-    ev->hold();
+    accEv->hold();
 }
 
-void Ramulator::DRAM_read_return_cb(ramulator::Request& req) {
+void Ramulator::onReadComplete(ramulator::Request& req) {
     bool isWrite = req.type == ramulator::Request::Type::WRITE;
 
     auto range = inflightRequests.equal_range(static_cast<uint64_t>(req._addr));
@@ -261,23 +260,23 @@ void Ramulator::DRAM_read_return_cb(ramulator::Request& req) {
     }
     assert((it != inflightRequests.end()));
 
-    RamulatorAccEvent* ev = it->second;
-    uint32_t lat = curCycle + 1 - ev->sCycle;
-    uint32_t service_lat = curCycle + 1 - ev->issueCycle;
+    RamulatorAccEvent* accEv = it->second;
+    uint32_t lat = curCycle + 1 - accEv->sCycle;
+    uint32_t service_lat = curCycle + 1 - accEv->issueCycle;
 
-    if (ev->isWrite()) {
+    if (accEv->isWrite()) {
         profWrites.inc();
         profTotalWrLat.inc(lat);
     } else {
         profReads.inc();
         profTotalRdLat.inc(lat);
-        profTotalRdLatBound.inc(ev->boundLatency);
+        profTotalRdLatBound.inc(accEv->boundLatency);
 
         // adding error of bound and weave (error percent)
-        uint32_t absErr = 100*((lat>ev->boundLatency)?(lat-ev->boundLatency) : (ev->boundLatency-lat));
+        uint32_t absErr = 100*((lat>accEv->boundLatency)?(lat-accEv->boundLatency) : (accEv->boundLatency-lat));
         absErr /= lat;
         // printf("Ramulator: core %d, addr 0x%lx, weave lat %u, bound lat %u, abs error %u%%\n",
-        //     ev->coreid, ev->addr, lat, ev->boundLatency, absErr);
+        //     accEv->coreid, accEv->addr, lat, accEv->boundLatency, absErr);
         profTotalAbsError.inc(absErr);
         profTotalAbsErrorCounter.inc();
 
@@ -286,15 +285,15 @@ void Ramulator::DRAM_read_return_cb(ramulator::Request& req) {
         estimators[req.coreid]->updateModel(lat);
     }
 
-    coreTracker.recordComplete(ev->coreid, lat, service_lat, ev->isWrite());
-    ev->release();
-    ev->done(curCycle + 1);
+    coreTracker.recordComplete(accEv->coreid, lat, service_lat, accEv->isWrite());
+    accEv->release();
+    accEv->done(curCycle + 1);
     inflightRequests.erase(it);
 }
 
-void Ramulator::DRAM_write_return_cb(ramulator::Request& req) {
+void Ramulator::onWriteComplete(ramulator::Request& req) {
     // Same as read for now
-    DRAM_read_return_cb(req);
+    onReadComplete(req);
 }
 
 void Ramulator::pushInFlights() {
@@ -302,8 +301,8 @@ void Ramulator::pushInFlights() {
 
     int numberOfTries = 0;
     for (auto it = notQueuedRequests.begin(); it != notQueuedRequests.end();) {
-        auto* mem_ev = *it;
-        if (mem_ev->sCycle > curCycle) {
+        auto* accEv = *it;
+        if (accEv->sCycle > curCycle) {
             ++it;
             continue;
         }
@@ -313,18 +312,18 @@ void Ramulator::pushInFlights() {
         }
         numberOfTries++;
 
-        ramulator::Request request = getRequestFromAccEvent(mem_ev);
-        if (wrapper->send(request)) {
-            if (!mem_ev->isWrite()) {
+        ramulator::Request backendReq = getRequestFromAccEvent(accEv);
+        if (wrapper->send(backendReq)) {
+            if (!accEv->isWrite()) {
                 // only for reads
-                profTotalSkewLat.inc(curCycle - mem_ev->sCycle);
+                profTotalSkewLat.inc(curCycle - accEv->sCycle);
             }
 
-            mem_ev->dramIssueCycle = dramCycle;
-            mem_ev->issueCycle = curCycle;
+            accEv->dramIssueCycle = dramCycle;
+            accEv->issueCycle = curCycle;
 
-            coreTracker.recordIssue(mem_ev->coreid, mem_ev->issueCycle, mem_ev->sCycle, mem_ev->isWrite());
-            inflightRequests.insert({ mem_ev->addr, mem_ev });
+            coreTracker.recordIssue(accEv->coreid, accEv->issueCycle, accEv->sCycle, accEv->isWrite());
+            inflightRequests.insert({ accEv->addr, accEv });
 
             it = notQueuedRequests.erase(it);
         } else {

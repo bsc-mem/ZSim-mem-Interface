@@ -55,9 +55,8 @@ class DRAMsim3Memory : public MemObject
     g_string name;
     uint32_t domain;
     g_vector<IBoundMemLatencyEstimator*> estimators;
-    dramsim3::MemorySystem* dramCore;
+    dramsim3::MemorySystem* wrapper;
     std::ofstream dump_trace_file;
-    std::ofstream dump_est_file;
 
     g_multimap<uint64_t, DRAMsim3AccEvent *> inflightRequests;
     g_vector<DRAMsim3AccEvent *> notQueuedRequests; // FIXME: use multiple queue based on ctrl prevents iterating 
@@ -81,18 +80,15 @@ class DRAMsim3Memory : public MemObject
     Counter profTotalRdLat;
     Counter profTotalRdLatBound; 
     Counter profTotalWrLat;
-    Counter profTotalOsLat;
     Counter profTotalSkewLat;
     Counter reissuedAccesses;
     Counter queueNotFull;
     PAD();
 
   public:
-    DRAMsim3Memory(std::string &ConfigName, std::string &OutputDir,
-                   int cpuFreqMHz, uint32_t _domain, const g_string &_name, const std::vector<uint32_t>& trackedCores = {});
-
-    DRAMsim3Memory(std::string& ConfigName, std::string& OutputDir, g_vector<IBoundMemLatencyEstimator*> _estimators,
-        int cpuFreqMHz, uint32_t _domain, const g_string& _name, const bool _dump_trace = false, const std::vector<uint32_t>& trackedCores = {});
+    DRAMsim3Memory(const g_string& name, uint32_t domain, int cpuFreqMHz, const std::string& configPath,
+        const std::string& outputDir, g_vector<IBoundMemLatencyEstimator*> estimators,
+        bool dumpTrace = false, const std::vector<uint32_t>& trackedCores = {});
     ~DRAMsim3Memory();
 
     const char *getName() { return name.c_str(); }
@@ -104,23 +100,21 @@ class DRAMsim3Memory : public MemObject
 
     // Event-driven simulation (phase 2)
     uint32_t tick(uint64_t cycle);
-    void enqueue(DRAMsim3AccEvent *ev, uint64_t cycle);
+    void enqueue(DRAMsim3AccEvent *accEv, uint64_t cycle);
 
     void printStats();
 
 private:
-    void DRAM_read_return_cb(uint64_t addr);
-    void DRAM_write_return_cb(uint64_t addr);
+    void onReadComplete(uint64_t addr);
+    void onWriteComplete(uint64_t addr);
     std::function<void(uint64_t)> callBackFn;
     uint64_t dramPsPerClk, cpuPsPerClk;
     uint64_t dramPs, cpuPs;
     uint64_t lstFinished;
-    int tCL;
-
     lock_t updateLock;
 
     void pushInFlights();
-    void dumpTransaction(DRAMsim3AccEvent *ev, std::string tag = "");
+    void dumpTransaction(DRAMsim3AccEvent *accEv, std::string tag = "");
     MemCoreTracker coreTracker;
 };
 

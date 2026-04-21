@@ -24,11 +24,6 @@ private:
     uint32_t domain;
     g_vector<IBoundMemLatencyEstimator*> estimators;
 
-    uint32_t cpuFreq;
-    double tCK;
-    double memFreq;
-    unsigned freqRatio;
-    unsigned long long tickCounter = 0;
     Ramulator::Ramulator2Wrapper* wrapper;
 
     bool isBoundPhase = false;
@@ -52,8 +47,9 @@ private:
     PAD();
 
 public:
-    Ramulator2(std::string config_path, g_vector<IBoundMemLatencyEstimator*> _estimators, unsigned num_cpus,
-        uint32_t _domain, unsigned _cpuFreq, bool _record_memory_trace, const g_string& name, const std::vector<uint32_t>& trackedCores = {});
+    Ramulator2(const g_string& name, uint32_t domain, unsigned cpuFreq, const std::string& configPath,
+        g_vector<IBoundMemLatencyEstimator*> estimators, unsigned numCpus, bool recordMemoryTrace,
+        const std::vector<uint32_t>& trackedCores = {});
     ~Ramulator2();
 
     void finish();
@@ -66,21 +62,19 @@ public:
 
     // Event-driven simulation (phase 2)
     uint32_t tick(uint64_t cycle);
-    void enqueue(Ramulator2AccEvent* ev, uint64_t cycle);
+    void enqueue(Ramulator2AccEvent* accEv, uint64_t cycle);
 
 private:
     uint64_t dramPsPerClk, cpuPsPerClk;
     uint64_t dramPs, cpuPs;
     lock_t updateLock;
 
-    // Completion handler without depending on Ramulator2 Request type
-    void handle_completion(uint64_t addr, int type_id, int source_id);
-    void DRAM_read_return_cb(Ramulator::Request& req);
-    void DRAM_write_return_cb(Ramulator::Request& req);
+    void onReadComplete(Ramulator::Request& backendReq);
+    void onWriteComplete(Ramulator::Request& backendReq);
 
     g_vector<Ramulator2AccEvent*> notQueuedRequests;
 
-    Ramulator::Request getRequestFromAccEvent(Ramulator2AccEvent* ev);
+    Ramulator::Request getRequestFromAccEvent(Ramulator2AccEvent* accEv);
     void pushInFlights();
     MemCoreTracker coreTracker;
 };

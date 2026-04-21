@@ -32,12 +32,7 @@ class Ramulator : public MemObject { //one Ramulator controller
     uint32_t domain;
     g_vector<IBoundMemLatencyEstimator*> estimators;
 
-    uint32_t cpuFreq;
-    double tCK;
-    double memFreq;
-    unsigned freqRatio;
     bool pim_mode;
-    g_string application_name;
     ramulator::RamulatorWrapper* wrapper;
     Stats_ramulator::StatList* statList;
 
@@ -64,8 +59,10 @@ class Ramulator : public MemObject { //one Ramulator controller
     PAD();
 
   public:
-    Ramulator(std::string config_file, unsigned num_cpus, unsigned cache_line_size, uint32_t _minLatency, uint32_t _domain, const g_string& _name, bool pim_mode,  const std::string& application, unsigned _cpuFreq, bool _record_memory_trace, bool networkOverhead, const std::vector<uint32_t>& trackedCores = {});
-    Ramulator(std::string config_file, g_vector<IBoundMemLatencyEstimator*> _estimators, unsigned num_cpus, unsigned cache_line_size, uint32_t _domain, const g_string& _name, bool pim_mode,  const std::string& application, unsigned _cpuFreq, bool _record_memory_trace, bool networkOverhead, const std::vector<uint32_t>& trackedCores = {});
+    Ramulator(const g_string& name, uint32_t domain, unsigned cpuFreq, const std::string& configPath,
+              g_vector<IBoundMemLatencyEstimator*> estimators, unsigned numCpus, unsigned cacheLineSize,
+              bool pimMode, const std::string& application, bool recordMemoryTrace, bool networkOverhead,
+              const std::vector<uint32_t>& trackedCores = {});
     ~Ramulator();
     void finish();
 
@@ -77,7 +74,7 @@ class Ramulator : public MemObject { //one Ramulator controller
 
     // Event-driven simulation (phase 2)
     uint32_t tick(uint64_t cycle);
-    void enqueue(RamulatorAccEvent* ev, uint64_t cycle);
+    void enqueue(RamulatorAccEvent* accEv, uint64_t cycle);
 
   private:
     uint64_t dramPsPerClk, cpuPsPerClk;
@@ -87,13 +84,13 @@ class Ramulator : public MemObject { //one Ramulator controller
 
     lock_t updateLock;
 
-    void DRAM_read_return_cb(ramulator::Request&);
-    void DRAM_write_return_cb(ramulator::Request&);
+    void onReadComplete(ramulator::Request&);
+    void onWriteComplete(ramulator::Request&);
 
     g_vector<RamulatorAccEvent*> notQueuedRequests;
 
 
-    ramulator::Request getRequestFromAccEvent(RamulatorAccEvent* ev);
+    ramulator::Request getRequestFromAccEvent(RamulatorAccEvent* accEv);
     void pushInFlights();
     MemCoreTracker coreTracker;
 };

@@ -393,7 +393,7 @@ MemObject* BuildMemoryController(Config& config, uint32_t lineSize, uint32_t fre
     }
     #ifdef _WITH_DRAMSIM3_
     else if (type == "DRAMsim3") {
-        const bool dump_trace = config.get<bool>("sys.mem.dumpTrace", false);
+        const bool dumpTrace = config.get<bool>("sys.mem.dumpTrace", false);
 
         string estimatorType = config.get<const char*>("sys.mem.boundPhaseLatencyEstimator", "fix");
         string dramIni = config.get<const char*>("sys.mem.configIni");
@@ -404,7 +404,7 @@ MemObject* BuildMemoryController(Config& config, uint32_t lineSize, uint32_t fre
            estimators.push_back(createEstimator(estimatorType, latency));
         }
 
-        mem = new DRAMsim3Memory(dramIni, outputDir, estimators, frequency, domain, name, dump_trace, trackedCores);
+        mem = new DRAMsim3Memory(name, domain, frequency, dramIni, outputDir, estimators, dumpTrace, trackedCores);
         zinfo->simEndHandlers->push_back([mem]() {((DRAMsim3Memory*)mem)->printStats();});
     } 
     #endif
@@ -415,7 +415,7 @@ MemObject* BuildMemoryController(Config& config, uint32_t lineSize, uint32_t fre
         string ramulatorConfig = config.get<const char*>("sys.mem.ramulatorConfig");
         bool pimMode = config.get<bool>("sim.pimMode", false);
         bool networkOverhead = config.get<bool>("sim.networkOverhead", false);
-        bool record_memory_trace = config.get<bool>("sim.recordMemoryTrace", false);
+        bool recordMemoryTrace = config.get<bool>("sim.recordMemoryTrace", false);
         string estimatorType = config.get<const char*>("sys.mem.boundPhaseLatencyEstimator", "fix");
         g_vector<IBoundMemLatencyEstimator*> estimators;
         estimators.reserve(zinfo->numCores);
@@ -423,7 +423,7 @@ MemObject* BuildMemoryController(Config& config, uint32_t lineSize, uint32_t fre
            estimators.push_back(createEstimator(estimatorType, latency));
         }
 
-        mem = new Ramulator(ramulatorConfig, estimators, zinfo->numCores, lineSize, domain, name, pimMode, application, frequency, record_memory_trace, networkOverhead, trackedCores);
+        mem = new Ramulator(name, domain, frequency, ramulatorConfig, estimators, zinfo->numCores, lineSize, pimMode, application, recordMemoryTrace, networkOverhead, trackedCores);
         zinfo->simEndHandlers->push_back([mem]() {((Ramulator*)mem)->finish();});
     } else if (type == "RamulatorOrg") {
         string ramulatorConfig = config.get<const char*>("sys.mem.ramulatorConfig");
@@ -446,7 +446,7 @@ MemObject* BuildMemoryController(Config& config, uint32_t lineSize, uint32_t fre
        for (uint32_t i = 0; i < zinfo->numCores; i++) {
           estimators.push_back(createEstimator(estimatorType, latency));
        }
-       mem = new Ramulator2(ramulator2Config, estimators, zinfo->numCores, domain, frequency, false, name, trackedCores);
+       mem = new Ramulator2(name, domain, frequency, ramulator2Config, estimators, zinfo->numCores, false, trackedCores);
        zinfo->simEndHandlers->push_back([mem]() {((Ramulator2*)mem)->finish();});
     }
     #endif
