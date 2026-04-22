@@ -32,7 +32,20 @@ globSrcNodes = Glob("*.cpp") + Glob("virt/*.cpp")
 libSrcs = [str(x) for x in globSrcNodes if str(x) not in excludeSrcs]
 libSrcs += [str(x) for x in syscallSrc]
 libSrcs = list(set(libSrcs)) # ensure syscallSrc is not duplicated
-libEnv.SharedLibrary("zsim.so", libSrcs)
+
+# DRAMSys headers trigger template errors when compiled with -fabi-version=2.
+# Build DRAMSys-facing translation units with that flag removed.
+dramsysSrcs = ["dramsys_wrapper.cpp", "dramsys_mem_ctrl.cpp"]
+dramsysSrcs = [s for s in dramsysSrcs if s in libSrcs]
+libSrcs = [s for s in libSrcs if s not in dramsysSrcs]
+
+dramsysObjs = []
+if dramsysSrcs:
+    dramsysEnv = libEnv.Clone()
+    dramsysEnv["CPPFLAGS"] = [f for f in dramsysEnv["CPPFLAGS"] if f != "-fabi-version=2"]
+    dramsysObjs = dramsysEnv.SharedObject(dramsysSrcs)
+
+libEnv.SharedLibrary("zsim.so", libSrcs + dramsysObjs)
 
 # Build tracing utilities (need hdf5 & dynamic linking)
 traceEnv = env.Clone()

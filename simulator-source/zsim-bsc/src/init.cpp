@@ -50,6 +50,7 @@
 #include "ramulator_org_mem_ctrl.h"
 #include "ramulator2_mem_ctrl.h"
 #include "dramsim3_mem_ctrl.h"
+#include "dramsys_mem_ctrl.h"
 #include "dramsim_mem_ctrl.h"
 #include "event_queue.h"
 #include "filter_cache.h"
@@ -448,6 +449,28 @@ MemObject* BuildMemoryController(Config& config, uint32_t lineSize, uint32_t fre
        }
        mem = new Ramulator2(name, domain, frequency, ramulator2Config, estimators, zinfo->numCores, false, trackedCores);
        zinfo->simEndHandlers->push_back([mem]() {((Ramulator2*)mem)->finish();});
+    }
+    #endif
+    #ifdef _WITH_DRAMSYS_
+    else if (type == "DRAMSys") {
+        static uint32_t dramsysCtrlId = 0;
+        const uint32_t numControllers = config.get<uint32_t>("sys.mem.controllers", 1);
+        if (dramsysCtrlId >= numControllers) {
+            panic("DRAMSys controller id overflow (%u >= %u)", dramsysCtrlId, numControllers);
+        }
+
+        const string estimatorType = config.get<const char*>("sys.mem.boundPhaseLatencyEstimator", "fix");
+        const string dramsysConfig = config.get<const char*>("sys.mem.dramsysConfig");
+
+        g_vector<IBoundMemLatencyEstimator*> estimators;
+        estimators.reserve(zinfo->numCores);
+        for (uint32_t i = 0; i < zinfo->numCores; i++) {
+            estimators.push_back(createEstimator(estimatorType, latency));
+        }
+
+        mem = new DRAMSysMemory(name, domain, dramsysCtrlId, numControllers, frequency,
+                                dramsysConfig, estimators, trackedCores);
+        dramsysCtrlId++;
     }
     #endif
     else if (type == "Detailed") {

@@ -37,9 +37,10 @@ def configure_pin_paths(env, pinpath):
         ".", xedPath, pinIncl, joinpath(pinIncl, "gen"),
         joinpath(pinpath, "extras/components/include")
     ])
+    versionScript = "pintool-dramsys.ver" if os.path.exists("pintool-dramsys.ver") else joinpath(pinIncl, "pintool.ver")
     env.Append(PINLINKFLAGS=[
         "-Wl,--hash-style=sysv", "-Wl,-Bsymbolic",
-        f"-Wl,--version-script={joinpath(pinIncl, 'pintool.ver')}"
+        f"-Wl,--version-script={versionScript}"
     ])
     env.Append(PINLIBPATH=[
         "/usr/lib", "/usr/lib/x86_64-linux-gnu",
@@ -56,7 +57,8 @@ def configure_optional_libs(env):
         "DRAMSIMPATH": ("dramsim", "-D_WITH_DRAMSIM_=1"),
         "DRAMSIM3PATH": ("dramsim3", "-D_WITH_DRAMSIM3_=1"),
         "RAMULATORPATH": ("ramulator", "-D_WITH_RAMULATOR_=1"),
-        "RAMULATOR2PATH": ("ramulator2", "-D_WITH_RAMULATOR2_=1")
+        "RAMULATOR2PATH": ("ramulator2", "-D_WITH_RAMULATOR2_=1"),
+        "DRAMSYSPATH": ("dramsys", "-D_WITH_DRAMSYS_=1")
     }
     # RAMULATOR and RAMULATOR2 cannot both be defined as active at compile time.
     # When both paths are set, suppress RAMULATOR2's compile-time flag so the
@@ -74,27 +76,46 @@ def configure_optional_libs(env):
             extra_includes = [joinpath(path, "ramulator")]
         elif var == "RAMULATOR2PATH":
             extra_includes = [
-                joinpath(path, "src"),
                 joinpath(path, "ext", "yaml-cpp", "include"),
                 joinpath(path, "ext", "spdlog", "include"),
                 joinpath(path, "ext", "argparse", "include"),
             ]
+        elif var == "DRAMSYSPATH":
+            extra_includes = [
+                joinpath(path, "lib", "DRAMPower", "src", "DRAMPower"),
+                joinpath(path, "lib", "sqlite"),
+                joinpath(path, "lib", "systemc", "src"),
+                joinpath(path, "lib", "DRAMUtils", "include"),
+                joinpath(path, "lib", "json", "include"),
+            ]
+            
         env.Append(CPPPATH=[path, joinpath(path, "include"), joinpath(path, "src")] + extra_includes)
+
         lib_paths = [path, joinpath(path, "library")]
         if var == "RAMULATORPATH":
             lib_paths += [joinpath(path, "ramulator")]
-        elif var == "DRAMSIM3PATH":
+        elif var == "DRAMSIM3PATH" or var == "RAMULATOR2PATH":
             pass  # libdramsim3.so is output directly to $DRAMSIM3PATH/ by cmake
-        elif var == "RAMULATOR2PATH":
-            pass  # libramulator2.so is output directly to $RAMULATOR2PATH/ by cmake (LIBRARY_OUTPUT_DIRECTORY=PROJECT_SOURCE_DIR)
+        elif var == "DRAMSYSPATH":
+            lib_paths += [joinpath(path, "build", "lib")]
         env.Append(PINLIBPATH=lib_paths)
+
+        if var == "RAMULATOR2PATH" and suppress_ram2_define:
+            continue  # include/link ramulator2 but don't define _WITH_RAMULATOR2_=1
+
         rpath_dirs = [path]
         if var == "RAMULATORPATH":
             rpath_dirs += [joinpath(path, "ramulator")]
         env.Append(LINKFLAGS=[f"-Wl,-R{d}" for d in rpath_dirs])
-        env.Append(PINLIBS=[libname])
-        if var == "RAMULATOR2PATH" and suppress_ram2_define:
-            continue  # include/link ramulator2 but don't define _WITH_RAMULATOR2_=1
+
+        if var == "DRAMSYSPATH":
+            build_lib = joinpath(path, "build", "lib")
+            env.Prepend(PINLIBPATH=[build_lib])
+            env.Append(CPPFLAGS=["-DSQLITE_ENABLE_RTREE=1"])
+            env.Append(PINLIBS=["dramsys", "DRAMPower", "systemc", "sqlite3"])
+        else:
+            env.Append(PINLIBS=[libname])
+
         env.Append(CPPFLAGS=[define])
 
 def configure_hdf5(env):
