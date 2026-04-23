@@ -68,7 +68,7 @@ experiments/01-baseline/test-raw/
 
 Before generating new run directories, `runner.sh` removes any existing `test-raw/measurment_*` directories for the selected stage.
 
-`00-system-agnostic` is not intended for this shared runner flow. Use stages `01` to `09` with `runner.sh`.
+`00-system-agnostic` is not intended for this shared runner flow. Use stages `01` to `10` with `runner.sh`.
 
 `08-portability-ramulator2` has one extra requirement: ZSim must be rebuilt with Ramulator2-only linkage (unset `RAMULATORPATH` before rebuilding). `runner.sh` checks this and prompts before continuing in mixed environments.
 
@@ -212,3 +212,9 @@ Raw manifest: [`09-portability-dramsim3/raw-manifest.csv`](09-portability-dramsi
 | Memory interface view | Application view |
 |:---:|:---:|
 | <img src="09-portability-dramsim3/figures/pngs/bandwidth_latency_zsim_mem.png" height="220"> | <img src="09-portability-dramsim3/figures/pngs/bandwidth_latency_zsim_core.png" height="220"> |
+
+### `10-portability-dramsys`
+
+Paper figure: extension portability stage (DRAMSys)  
+Committed views: config stage only (no committed figures yet)  
+Raw manifest: [`10-portability-dramsys/raw-manifest.csv`](10-portability-dramsys/raw-manifest.csv)
