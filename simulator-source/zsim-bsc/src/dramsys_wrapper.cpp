@@ -24,16 +24,13 @@ DRAMSysWrapper::DRAMSysWrapper(const sc_core::sc_module_name& name,
     tCK_ = memSpec.tCK;
     addressRangeBytes_ = memSpec.getSimMemSizeInBytes();
 
-    printf("***********************************");
-    printf("the tick is : %f", tCK_.to_double());
-    printf("***********************************");
     futex_init(&stateLock_);
     iSocket_.register_nb_transport_bw(this, &DRAMSysWrapper::nb_transport_bw);
     iSocket_.bind(dramsys_->tSocket);
 }
 
 DRAMSysWrapper::~DRAMSysWrapper() {
-    // Any payload still in flight is released to avoid leaks on teardown.
+    // any payload still in flight is released to avoid leaks on teardown.
     futex_lock(&stateLock_);
     if (requestInProgress_) {
         requestInProgress_->release();
@@ -64,6 +61,8 @@ bool DRAMSysWrapper::trySend(const Request& req) {
     trans->set_response_status(tlm::TLM_INCOMPLETE_RESPONSE);
 
     if (dataBytes_ > 0 && trans->get_data_ptr()) {
+        // TODO: random pattern or some heuristic based payload creating 
+        // is better and more realistic (StoreMode is better to be false because zsim only consider timings)
         std::memset(trans->get_data_ptr(), 0, dataBytes_);
     }
 
@@ -100,7 +99,6 @@ bool DRAMSysWrapper::trySend(const Request& req) {
         return true;
     }
 
-    // Unknown status path: treat as rejected.
     futex_lock(&stateLock_);
     if (requestInProgress_ == trans) {
         requestInProgress_ = nullptr;
@@ -111,10 +109,8 @@ bool DRAMSysWrapper::trySend(const Request& req) {
 }
 
 uint64_t DRAMSysWrapper::normalizeAddress(uint64_t addr) const {
-    // Step 1: clear top/sign bit used by some integrations for metadata.
     uint64_t normalized = addr & 0x7fffffffffffffffULL;
-
-    // Step 2: fold into modeled DRAM address range.
+    // normalize range
     if (addressRangeBytes_ > 0) {
         normalized %= addressRangeBytes_;
     }
