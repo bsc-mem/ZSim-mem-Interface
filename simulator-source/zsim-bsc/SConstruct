@@ -81,14 +81,24 @@ def configure_optional_libs(env):
                 joinpath(path, "ext", "argparse", "include"),
             ]
         elif var == "DRAMSYSPATH":
-            extra_includes = [
-                joinpath(path, "lib", "DRAMPower", "src", "DRAMPower"),
-                joinpath(path, "lib", "sqlite"),
-                joinpath(path, "lib", "systemc", "src"),
-                joinpath(path, "lib", "DRAMUtils", "include"),
-                joinpath(path, "lib", "json", "include"),
-            ]
-            
+            local_path = os.environ.get("DRAMSYS_DEPS_PATH")
+            if local_path:
+                extra_includes = [
+                    joinpath(local_path, "DRAMPower", "src", "DRAMPower"),
+                    joinpath(local_path, "SQLite3"),
+                    joinpath(local_path, "SystemCLanguage", "src"),
+                    joinpath(local_path, "DRAMUtils", "include"),
+                    joinpath(local_path, "nlohmann_json", "include"),
+                ]
+            else:
+                # Default behavior: use DRAMSys FetchContent build layout.
+                deps_path = joinpath(path, "build", "_deps")
+                fc_drampower = joinpath(deps_path, "drampower-src", "src", "DRAMPower")
+                fc_sqlite = joinpath(deps_path, "sqlite3-src")
+                fc_systemc = joinpath(deps_path, "systemclanguage-src", "src")
+                fc_dramutils = joinpath(deps_path, "dramutils-src", "include")
+                fc_json = joinpath(deps_path, "nlohmann_json-src", "include")
+                extra_includes = [fc_drampower, fc_sqlite, fc_systemc, fc_dramutils, fc_json]
         env.Append(CPPPATH=[path, joinpath(path, "include"), joinpath(path, "src")] + extra_includes)
 
         lib_paths = [path, joinpath(path, "library")]
