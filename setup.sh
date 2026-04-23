@@ -102,6 +102,8 @@ ok ".zsim-env sourced"
 # ── 2. Build memory simulators ───────────────────────────────────────────────
 step "Step 3 / 5 — Building memory simulators"
 
+OLD_ABI_CXXFLAG="-D_GLIBCXX_USE_CXX11_ABI=0"
+
 # Ramulator — make libramulator.so in ramulator/ramulator/
 RAMULATOR_LIB="$RAMULATORPATH/ramulator/libramulator.so"
 if [[ -f "$RAMULATORPATH/ramulator/libramulator.so" ]] && [[ "$REBUILD" == false ]]; then
@@ -109,7 +111,7 @@ if [[ -f "$RAMULATORPATH/ramulator/libramulator.so" ]] && [[ "$REBUILD" == false
 else
     echo "  Building Ramulator..."
     [[ "$REBUILD" == true ]] && make -C "$RAMULATORPATH/ramulator" clean 2>/dev/null || true
-    make -C "$RAMULATORPATH/ramulator" libramulator.so -j"$(nproc)" CXX=g++ CXXFLAGS='-DRAMULATOR -Wall -std=c++11 -w -O3 -D_GLIBCXX_USE_CXX11_ABI=0'
+    make -C "$RAMULATORPATH/ramulator" libramulator.so -j"$(nproc)" CXX=g++ CXXFLAGS="-DRAMULATOR -Wall -std=c++11 -w -O3 $OLD_ABI_CXXFLAG"
     [[ -f "$RAMULATORPATH/ramulator/libramulator.so" ]] && ok "libramulator.so built" || err "Ramulator build failed."
 fi
 
@@ -123,7 +125,7 @@ else
     cmake -S "$DRAMSIM3PATH" -B "$DRAMSIM3PATH/build" \
         -DCMAKE_BUILD_TYPE=Release \
         -DCMAKE_POSITION_INDEPENDENT_CODE=ON \
-        -DCMAKE_CXX_FLAGS="-D_GLIBCXX_USE_CXX11_ABI=0" 2>&1 | tail -3
+        -DCMAKE_CXX_FLAGS="$OLD_ABI_CXXFLAG" 2>&1 | tail -3
     make -C "$DRAMSIM3PATH/build" dramsim3 -j"$(nproc)"
     [[ -f "$DRAMSIM3_LIB" ]] && ok "libdramsim3.so built" || err "DRAMsim3 build failed."
 fi
@@ -138,7 +140,7 @@ else
     cmake -S "$RAMULATOR2PATH" -B "$RAMULATOR2PATH/build" \
         -DCMAKE_BUILD_TYPE=Release \
         -DCMAKE_POSITION_INDEPENDENT_CODE=ON \
-        -DCMAKE_CXX_FLAGS="-D_GLIBCXX_USE_CXX11_ABI=0"
+        -DCMAKE_CXX_FLAGS="$OLD_ABI_CXXFLAG"
     make -C "$RAMULATOR2PATH/build" ramulator -j"$(nproc)"
     [[ -f "$RAMULATOR2_LIB" ]] && ok "libramulator2.so built" || err "Ramulator2 build failed. Expected: $RAMULATOR2_LIB"
 fi
@@ -149,22 +151,35 @@ if [[ -n "${DRAMSYSPATH:-}" ]]; then
     DRAMSYS_LIB="$DRAMSYS_LIB_DIR/libdramsys.a"
     DRAMPOWER_LIB="$DRAMSYS_LIB_DIR/libDRAMPower.a"
     SYSTEMC_LIB="$DRAMSYS_LIB_DIR/libsystemc.a"
+    TRACE_ANALYZER_BIN="$DRAMSYSPATH/build/bin/TraceAnalyzer"
 
-    if [[ -f "$DRAMSYS_LIB" && -f "$DRAMPOWER_LIB" && -f "$SYSTEMC_LIB" ]] && [[ "$REBUILD" == false ]]; then
-        ok "DRAMSys libs already built"
+    if [[ -f "$DRAMSYS_LIB" && -f "$DRAMPOWER_LIB" && -f "$SYSTEMC_LIB" && -x "$TRACE_ANALYZER_BIN" ]] && [[ "$REBUILD" == false ]]; then
+        ok "DRAMSys libs and TraceAnalyzer already built"
     else
         echo "  Building DRAMSys from: $DRAMSYSPATH"
         [[ "$REBUILD" == true ]] && rm -rf "$DRAMSYSPATH/build" || true
-        cmake -S "$DRAMSYSPATH" -B "$DRAMSYSPATH/build" \
-            -DCMAKE_BUILD_TYPE=Release \
-            -DDRAMSYS_BUILD_CLI=OFF \
-            -DDRAMSYS_BUILD_TOOLS=OFF \
-            -DDRAMSYS_BUILD_TRACE_ANALYZER=OFF
-        cmake --build "$DRAMSYSPATH/build" -j"$(nproc)"
-        if [[ -f "$DRAMSYS_LIB" && -f "$DRAMPOWER_LIB" && -f "$SYSTEMC_LIB" ]]; then
-            ok "DRAMSys libs built (libdramsys.a, libDRAMPower.a, libsystemc.a)"
+        PYBIND11_CMAKE_DIR="$(python3 -m pybind11 --cmakedir 2>/dev/null || true)"
+        DRAMSYS_CMAKE_ARGS=(
+            -DCMAKE_BUILD_TYPE=Release
+            -DCMAKE_POSITION_INDEPENDENT_CODE=ON
+            -DCMAKE_CXX_FLAGS="$OLD_ABI_CXXFLAG"
+            -DDRAMSYS_BUILD_CLI=OFF
+            -DDRAMSYS_BUILD_TOOLS=OFF
+            -DDRAMSYS_BUILD_TRACE_ANALYZER=ON
+        )
+        if [[ -n "$PYBIND11_CMAKE_DIR" && -d "$PYBIND11_CMAKE_DIR" ]]; then
+            DRAMSYS_CMAKE_ARGS+=(-Dpybind11_DIR="$PYBIND11_CMAKE_DIR")
         else
-            err "DRAMSys build failed. Expected libs under: $DRAMSYS_LIB_DIR"
+            warn "pybind11 CMake package not found from python3; TraceAnalyzer configure may fail."
+        fi
+        cmake -S "$DRAMSYSPATH" -B "$DRAMSYSPATH/build" \
+            "${DRAMSYS_CMAKE_ARGS[@]}"
+        cmake --build "$DRAMSYSPATH/build" -j"$(nproc)"
+        if [[ -f "$DRAMSYS_LIB" && -f "$DRAMPOWER_LIB" && -f "$SYSTEMC_LIB" && -x "$TRACE_ANALYZER_BIN" ]]; then
+            ok "DRAMSys libs built (libdramsys.a, libDRAMPower.a, libsystemc.a)"
+            ok "TraceAnalyzer built: $TRACE_ANALYZER_BIN"
+        else
+            err "DRAMSys build failed. Expected libs under: $DRAMSYS_LIB_DIR and TraceAnalyzer at $TRACE_ANALYZER_BIN"
         fi
     fi
 else
