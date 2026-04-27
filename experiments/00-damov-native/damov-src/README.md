@@ -33,7 +33,6 @@ We point out next to the repository structure and some important folders and fil
 +-- get_workloads.sh
 +-- simulator/
 |   +-- command_files/
-|   +-- ramulator/
 |   +-- ramulator-configs/
 |   +-- scripts/
 |   +-- src/
@@ -48,12 +47,12 @@ Our framework requires both ZSim and Ramulator dependencies.
 * We use [lrztar](https://github.com/ckolivas/lrzip) to compress files.  
 
 ### Step 1: Installing the Simulator
-To install the simulator:
+In this artifact, DAMOV-SIM uses the repository-level dependency resolver instead
+of vendoring Pin and Ramulator under `damov-src`. To install the simulator from
+the repository root:
 ```
-cd simulator
-sudo sh ./scripts/setup.sh
-sh ./scripts/compile.sh
-cd ../
+./setup.sh
+./setup.sh --build-damov
 ```
 
 ### Step 2: Downloading the Workloads

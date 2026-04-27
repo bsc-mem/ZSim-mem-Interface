@@ -29,8 +29,8 @@ if [[ -z "$ZSIM_BIN" ]]; then
   echo "Unable to locate a built damov zsim binary under:" >&2
   echo "  $EXPERIMENT_DIR/damov-src/simulator/build/{release,opt}/zsim" >&2
   echo "User '$(id -un)' cannot run 00-damov-native because DAMOV native is not built yet." >&2
-  echo "Run from the repository root with root permission:" >&2
-  echo "  sudo ./setup.sh --build-damov" >&2
+  echo "Run from the repository root:" >&2
+  echo "  ./setup.sh --build-damov" >&2
   exit 1
 fi
 

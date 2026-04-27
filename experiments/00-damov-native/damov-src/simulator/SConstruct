@@ -4,6 +4,15 @@ from os.path import join as joinpath
 useIcc = False
 #useIcc = True
 
+def resolve_ramulator_dir(path):
+    if os.path.exists(joinpath(path, "RamulatorWrapper.h")):
+        return path
+    nested = joinpath(path, "ramulator")
+    if os.path.exists(joinpath(nested, "RamulatorWrapper.h")):
+        return nested
+    print ("ERROR: Could not find RamulatorWrapper.h under $RAMULATORPATH: " + path)
+    sys.exit(1)
+
 def buildSim(cppFlags, dir, type, pgo=None):
     ''' Build the simulator with a specific base buid dir and config type'''
 
@@ -156,10 +165,11 @@ def buildSim(cppFlags, dir, type, pgo=None):
     # Only include RAMULATORPATH if available
     if "RAMULATORPATH" in os.environ:
         RAMULATORPATH = os.environ["RAMULATORPATH"]
-        env["LINKFLAGS"] += " -Wl,-R" + RAMULATORPATH
-        #env["LINKFLAGS"] += " -Wl,-rpath," + RAMULATORPATH
-        env["PINLIBPATH"] += [RAMULATORPATH]
-        env["CPPPATH"] += [RAMULATORPATH]
+        RAMULATOR_LIB_DIR = resolve_ramulator_dir(RAMULATORPATH)
+        env["LINKFLAGS"] += " -Wl,-R" + RAMULATOR_LIB_DIR
+        #env["LINKFLAGS"] += " -Wl,-rpath," + RAMULATOR_LIB_DIR
+        env["PINLIBPATH"] += [RAMULATOR_LIB_DIR]
+        env["CPPPATH"] += [RAMULATORPATH, RAMULATOR_LIB_DIR]
         env["PINLIBS"] += ["ramulator"]
         env["CPPFLAGS"] += " -D_WITH_RAMULATOR_=1 "
 

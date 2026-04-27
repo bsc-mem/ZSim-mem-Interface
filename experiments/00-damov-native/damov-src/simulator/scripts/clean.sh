@@ -1,18 +1,23 @@
-#!/bin/bash
-ZSIMPATH=$(pwd)
-PINPATH="$ZSIMPATH/pin"
-LIBCONFIGPATH="$ZSIMPATH/libconfig"
-RAMULATORPATH="$ZSIMPATH/ramulator"
+#!/usr/bin/env bash
+set -euo pipefail
 
-#export LIBCONFIGPATH
-#cd $LIBCONFIGPATH
-#make clean-libtool
-#cd ..
+SCRIPT_REAL="$(python3 -c 'import os,sys; print(os.path.realpath(sys.argv[1]))' "${BASH_SOURCE[0]}")"
+SCRIPT_DIR="$(cd "$(dirname "$SCRIPT_REAL")" && pwd -P)"
+SIMULATOR_DIR="$(cd "$SCRIPT_DIR/.." && pwd -P)"
+EXPERIMENT_DIR="$(cd "$SIMULATOR_DIR/../.." && pwd -P)"
+REPO_ROOT="$(cd "$EXPERIMENT_DIR/../.." && pwd -P)"
+ENV_FILE="$REPO_ROOT/.zsim-env"
 
-export RAMULATORPATH
-cd $RAMULATORPATH
-make clean
-cd ..
+if [[ ! -f "$ENV_FILE" ]]; then
+  echo "Missing $ENV_FILE; run scripts/setup-env.sh from the repository root first." >&2
+  exit 1
+fi
 
-export PINPATH
-scons -c
+# shellcheck disable=SC1090
+source "$ENV_FILE"
+
+export PINPATH RAMULATORPATH LIBCONFIGPATH="$SIMULATOR_DIR/libconfig"
+(
+  cd "$SIMULATOR_DIR"
+  scons -c
+)

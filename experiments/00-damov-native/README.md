@@ -11,7 +11,12 @@ This stage is not currently tied to a main paper figure. It is kept as a system-
 - original config files
 - shared benchmark binaries are expected from `../../benchmarks/`
 - shared experiment entrypoints are available in `../runner.sh`, `../run-one.sh`, and `../plot.py`
+- DAMOV native simulator builds use `.zsim-env` for shared `PINPATH` and `RAMULATORPATH`
 - `raw-manifest.csv` tracks the current raw-data publication status for this stage
+
+## DAMOV Source Changes
+
+The DAMOV simulator logic is intentionally kept unchanged for this artifact. The local updates are limited to build and portability plumbing: the SCons scripts were updated to run with Python 3, syscall handling was refreshed for newer Ubuntu releases, and DAMOV now reuses the root project dependencies resolved by `setup.sh` (`PINPATH` and `RAMULATORPATH`) instead of duplicating Pin and Ramulator source trees under `damov-src`.
 
 ## Status
 

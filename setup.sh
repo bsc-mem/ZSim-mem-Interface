@@ -6,7 +6,7 @@
 #
 # Flags:
 #   --rebuild   Clean and force-rebuild all memory simulators and ZSim
-#   --build-damov   Build DAMOV native simulator only (requires root)
+#   --build-damov   Build DAMOV native simulator only
 #
 # What it does:
 #   1. Checks system dependencies (GCC, scons, Python packages, libconfig++)
@@ -43,9 +43,6 @@ fi
 
 if [[ "$BUILD_DAMOV" == true ]]; then
     step "Building DAMOV native simulator only"
-    if [[ "$EUID" -ne 0 ]]; then
-        err "--build-damov requires root privileges. Run: sudo ./setup.sh --build-damov"
-    fi
 
     DAMOV_BUILD_SCRIPT="$REPO_ROOT/experiments/00-damov-native/scripts/build.sh"
     if [[ ! -x "$DAMOV_BUILD_SCRIPT" ]]; then

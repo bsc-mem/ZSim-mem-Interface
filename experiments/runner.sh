@@ -25,6 +25,7 @@ run_damov_native_runner() {
   if [[ "$EUID" -ne 0 ]]; then
     echo "00-damov-native selected by user '$(id -un)' without root permission." >&2
     echo "This experiment can be executed with root permission (for DAMOV setup/build)." >&2
+    exit 1
   fi
 
   exec bash "$DAMOV_RUNNER" "$@"
