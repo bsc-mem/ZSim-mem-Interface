@@ -43,8 +43,58 @@ STATIC_CONFIG: Dict[str, str] = {
     "PLOT_DPI": "0",
 }
 
+PROFILE_OVERRIDES: Dict[str, Dict[str, str]] = {
+    "default": {},
+    "00-damov-native": {
+        "CPU_FREQ": "2.4",
+        "MEM_FREQ": "1.2",
+        "MEM_MAX_CHANNELS": "1",
+        "MEM_CHANNELS_PER_MEM_INSTANCE": "4",
+        "STATS_PATH": "traffic_gen_benchmark.zsim.out",
+        "RAMULATOR_STATS_PATH": "traffic_gen_benchmark.ramulator.stats",
+    },
+}
+
+PROFILE_ALIASES: Dict[str, str] = {
+    "00": "00-damov-native",
+    "damov": "00-damov-native",
+    "damov-native": "00-damov-native",
+}
+
 
 # ======================= CFG helpers ========================
+def normalize_profile_name(profile: str) -> str:
+    raw = (profile or "").strip().lower()
+    if not raw:
+        return "auto"
+    if raw in PROFILE_OVERRIDES:
+        return raw
+    return PROFILE_ALIASES.get(raw, raw)
+
+
+def infer_profile_from_paths(working_dir: str, config_dir: str) -> str:
+    paths = [
+        working_dir,
+        config_dir,
+        os.path.dirname(working_dir),
+        os.path.dirname(config_dir),
+    ]
+    for path in paths:
+        base = os.path.basename(os.path.normpath(path))
+        if base == "00-damov-native":
+            return "00-damov-native"
+    return "default"
+
+
+def build_config_for_profile(profile: str) -> Dict[str, str]:
+    normalized = normalize_profile_name(profile)
+    if normalized not in PROFILE_OVERRIDES:
+        raise ValueError(f"Unknown profile '{profile}'")
+    merged = STATIC_CONFIG.copy()
+    merged.update(PROFILE_OVERRIDES[normalized])
+    return merged
+
+
 def cfg_int(config: Dict[str, str], key: str) -> int:
     if key not in config:
         raise KeyError(f"Missing required config key '{key}'")
@@ -94,8 +144,6 @@ def normalize_stats_path(stats_path: str) -> Tuple[str, str]:
 # =============== zsim.out patterns of interest =================
 CORE_RE = re.compile(r"^\s*([A-Za-z0-9_.-]+)-(\d+):\s+# Core stats\s*$")
 MEMCTRL_RE = re.compile(r"^\s*mem-(\d+):\s+# Memory controller stats\s*$")
-RAMULATOR_TRACK_RE = re.compile(
-    r"^\s*ramulator\.track_cores\.core(\d+)\.read_latency_avg\s+([0-9Ee.+-]+)")
 RAMULATOR_TRACK_RE = re.compile(
     r"^\s*ramulator\.track_cores\.core(\d+)\.read_latency_avg\s+([0-9Ee.+-]+)")
 # ==========================================================
@@ -459,7 +507,11 @@ def parse_ptrchase_mem_latency(
     cpu_freq = cfg_float(config, "CPU_FREQ")
     if cpu_freq <= 0:
         raise ValueError("CPU_FREQ must be positive")
+    ram_freq = cfg_float(config, "MEM_FREQ")
+    if ram_freq <= 0:
+        raise ValueError("MEM_FREQ must be positive")
     ptr_core_id = cfg_int(config, "PTR_CHASE_CORE_ID")
+    ram_file = cfg_str(config, "RAMULATOR_STATS_PATH")
 
     for name in measurement_dirs:
         tokens = name.rstrip(".txt").split("_")
@@ -474,8 +526,14 @@ def parse_ptrchase_mem_latency(
 
         tracker_latency = extract_core_tracker_latency(trace_path, ptr_core_id)
         if tracker_latency is None:
-            continue
-        latency = tracker_latency / cpu_freq
+            # Some runs only expose the tracked latency in the Ramulator stats file.
+            ram_path = os.path.join(measurement_root, name, ram_file)
+            ram_latency = extract_ramulator_core_latency(ram_path, ptr_core_id)
+            if ram_latency is None:
+                continue
+            latency = ram_latency / ram_freq
+        else:
+            latency = tracker_latency / cpu_freq
 
         records.append(
             {
@@ -543,10 +601,6 @@ def parse_ramulator_mem_bandwidth(
 ) -> pd.DataFrame:
     records: List[Dict[str, object]] = []
     type_label = f"{cfg_str(config, 'MEM_TYPE')}-{cfg_str(config, 'MEM_FREQ')}"
-    ram_freq = cfg_float(config, "MEM_FREQ")
-    if ram_freq <= 0:
-        raise ValueError("CPU_FREQ must be positive")
-    ptr_core_id = cfg_int(config, "PTR_CHASE_CORE_ID")
     ram_file = cfg_str(config, "RAMULATOR_STATS_PATH")
 
     for name in measurement_dirs:
@@ -775,6 +829,11 @@ def main() -> int:
         "--config-dir",
         help="Directory used to derive the default output folder name. Defaults to working_dir.",
     )
+    parser.add_argument(
+        "--profile",
+        default="auto",
+        help="Experiment profile to use (auto, default, 00-damov-native).",
+    )
     args = parser.parse_args()
 
     working_dir = os.path.abspath(args.working_dir)
@@ -794,16 +853,61 @@ def main() -> int:
             default_name = os.path.basename(os.path.normpath(working_dir)) or "plot-output"
         output_dir = os.path.join(repo_root, "test-output", default_name)
 
-    config = STATIC_CONFIG.copy()
-
-    try:
-        stats_dir, stats_filename = normalize_stats_path(
-            cfg_str(config, "STATS_PATH"))
-    except ValueError as err:
-        print(f"Error: {err}", file=sys.stderr)
+    requested_profile = normalize_profile_name(args.profile)
+    if requested_profile != "auto" and requested_profile not in PROFILE_OVERRIDES:
+        choices = ", ".join(["auto", *PROFILE_OVERRIDES.keys()])
+        print(
+            f"Error: unknown profile '{args.profile}'. Valid values: {choices}.",
+            file=sys.stderr,
+        )
         return 1
-    measurement_dirs = list_measurement_dirs(
-        working_dir, stats_dir, stats_filename)
+
+    profile_candidates: List[str] = []
+    if requested_profile == "auto":
+        inferred = infer_profile_from_paths(working_dir, config_dir)
+        profile_candidates.append(inferred)
+        for profile_name in PROFILE_OVERRIDES:
+            if profile_name not in profile_candidates:
+                profile_candidates.append(profile_name)
+    else:
+        profile_candidates.append(requested_profile)
+
+    config: Dict[str, str] | None = None
+    stats_dir = ""
+    stats_filename = ""
+    measurement_dirs: List[str] = []
+    selected_profile = ""
+    for profile_name in profile_candidates:
+        candidate_config = build_config_for_profile(profile_name)
+        try:
+            candidate_stats_dir, candidate_stats_filename = normalize_stats_path(
+                cfg_str(candidate_config, "STATS_PATH")
+            )
+        except ValueError:
+            continue
+
+        candidate_measurements = list_measurement_dirs(
+            working_dir, candidate_stats_dir, candidate_stats_filename
+        )
+        if candidate_measurements:
+            config = candidate_config
+            stats_dir = candidate_stats_dir
+            stats_filename = candidate_stats_filename
+            measurement_dirs = candidate_measurements
+            selected_profile = profile_name
+            break
+
+    if config is None:
+        tried = ", ".join(profile_candidates)
+        print(
+            f"Error: no measurement directories with stats files found. Tried profiles: {tried}.",
+            file=sys.stderr,
+        )
+        return 1
+
+    if requested_profile == "auto":
+        print(f"Info: auto-selected profile '{selected_profile}'.")
+
     if not measurement_dirs:
         print("Error: no measurement directories with stats files found.",
               file=sys.stderr)
@@ -851,19 +955,25 @@ def main() -> int:
     agg_lat_mem_ram = pd.DataFrame()
     agg_bw_mem_ram = pd.DataFrame()
     has_memory_view = False
+    use_ramulator_bandwidth = False
 
     ram_latency_raw = parse_ramulator_mem_latency(
         working_dir, measurement_dirs, config)
-    ram_bandwidth_raw = parse_ramulator_mem_bandwidth(
-        working_dir, measurement_dirs, config)
-    if not ram_latency_raw.empty and not ram_bandwidth_raw.empty:
+    if not ram_latency_raw.empty:
         agg_lat_mem_ram = aggregate_metric(
             ram_latency_raw, "latency_mem_ptr_chase_ram")
-        agg_bw_mem_ram = aggregate_metric(
-            ram_bandwidth_raw, "bandwidth_ram")
-        has_memory_view = not agg_lat_mem_ram.empty and not agg_bw_mem_ram.empty
-    else:
+        has_memory_view = not agg_lat_mem_ram.empty
+        ram_bandwidth_raw = parse_ramulator_mem_bandwidth(
+            working_dir, measurement_dirs, config)
+        if not ram_bandwidth_raw.empty:
+            agg_bw_mem_ram = aggregate_metric(
+                ram_bandwidth_raw, "bandwidth_ram")
+            use_ramulator_bandwidth = not agg_bw_mem_ram.empty
+
+    if not has_memory_view:
         print("Info: memory-simulator view data unavailable, skipping backend plot.")
+    elif not use_ramulator_bandwidth:
+        print("Info: ramulator bandwidth unavailable, using zsim bandwidth for backend plot.")
 
     merged = agg_bw.merge(
         agg_lat_core, on=["type", "rd_percentage", "pause"], how="inner")
@@ -872,8 +982,9 @@ def main() -> int:
     if has_memory_view:
         merged = merged.merge(agg_lat_mem_ram, on=[
                               "type", "rd_percentage", "pause"], how="inner")
-        merged = merged.merge(agg_bw_mem_ram, on=[
-                              "type", "rd_percentage", "pause"], how="inner")
+        if use_ramulator_bandwidth:
+            merged = merged.merge(agg_bw_mem_ram, on=[
+                                  "type", "rd_percentage", "pause"], how="inner")
     if merged.empty:
         print("Error: merged dataset is empty.", file=sys.stderr)
         return 1
@@ -900,10 +1011,11 @@ def main() -> int:
     print(f"Wrote core latency plot to {plot_core_path}")
     print(f"Wrote mem latency plot to {plot_mem_path}")
     if has_memory_view:
+        ram_bandwidth_col = "bandwidth_ram" if use_ramulator_bandwidth else "bandwidth_bytes_per_second"
         dfs_mem_ram = split_by_rd_percentage(
             merged,
             latency_col="latency_mem_ptr_chase_ram",
-            bandwidth_col="bandwidth_ram",
+            bandwidth_col=ram_bandwidth_col,
         )
         plot_mem_ram_path = os.path.join(
             figures_dir, "bandwidth_latency_ramulator.pdf")
