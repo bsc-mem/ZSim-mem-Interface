@@ -10,7 +10,6 @@
 /simulator/heartbeat
 /simulator/trace.txt
 /simulator/pin.log
-simulator/libconfig/
 **/*.dep
 **/*.deppo
 **/*.po
@@ -25,5 +24,4 @@ simulator/libconfig/
 **/__pycache__/
 **/*.pyc
 **/tags
-**/libconfig/*
 simulator/ramulator/ramulator
