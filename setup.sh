@@ -87,6 +87,14 @@ else
     err "cmake not found. Install it: sudo apt install cmake"
 fi
 
+cmake_major="$(cmake --version | awk 'NR==1 {split($3, v, "."); print v[1]}')"
+CMAKE_COMPAT_ARGS=()
+# CMake 4 removed compatibility with projects that still declare <3.5.
+if [[ "$cmake_major" =~ ^[0-9]+$ ]] && (( cmake_major >= 4 )); then
+    CMAKE_COMPAT_ARGS=(-DCMAKE_POLICY_VERSION_MINIMUM=3.5)
+    echo "  Detected CMake ${cmake_major}.x; enabling legacy policy compatibility for bundled projects."
+fi
+
 # libconfig++
 if pkg-config --exists libconfig++ 2>/dev/null || ldconfig -p 2>/dev/null | grep -q libconfig++; then
     ok "libconfig++ found"
@@ -139,10 +147,15 @@ if [[ -f "$DRAMSIM3_LIB" ]] && [[ "$REBUILD" == false ]]; then
 else
     echo "  Building DRAMsim3..."
     [[ "$REBUILD" == true ]] && rm -rf "$DRAMSIM3PATH/build" || true
-    cmake -S "$DRAMSIM3PATH" -B "$DRAMSIM3PATH/build" \
-        -DCMAKE_BUILD_TYPE=Release \
-        -DCMAKE_POSITION_INDEPENDENT_CODE=ON \
-        -DCMAKE_CXX_FLAGS="-D_GLIBCXX_USE_CXX11_ABI=0" 2>&1 | tail -3
+    DRAMSIM3_CMAKE_ARGS=(
+        -S "$DRAMSIM3PATH"
+        -B "$DRAMSIM3PATH/build"
+        -DCMAKE_BUILD_TYPE=Release
+        -DCMAKE_POSITION_INDEPENDENT_CODE=ON
+        -DCMAKE_CXX_FLAGS="-D_GLIBCXX_USE_CXX11_ABI=0"
+    )
+    DRAMSIM3_CMAKE_ARGS+=("${CMAKE_COMPAT_ARGS[@]}")
+    cmake "${DRAMSIM3_CMAKE_ARGS[@]}"
     make -C "$DRAMSIM3PATH/build" dramsim3 -j"$(nproc)"
     [[ -f "$DRAMSIM3_LIB" ]] && ok "libdramsim3.so built" || err "DRAMsim3 build failed."
 fi
@@ -154,10 +167,15 @@ if [[ -f "$RAMULATOR2_LIB" ]] && [[ "$REBUILD" == false ]]; then
 else
     echo "  Building Ramulator2 from: $RAMULATOR2PATH"
     [[ "$REBUILD" == true ]] && rm -rf "$RAMULATOR2PATH/build" || true
-    cmake -S "$RAMULATOR2PATH" -B "$RAMULATOR2PATH/build" \
-        -DCMAKE_BUILD_TYPE=Release \
-        -DCMAKE_POSITION_INDEPENDENT_CODE=ON \
+    RAMULATOR2_CMAKE_ARGS=(
+        -S "$RAMULATOR2PATH"
+        -B "$RAMULATOR2PATH/build"
+        -DCMAKE_BUILD_TYPE=Release
+        -DCMAKE_POSITION_INDEPENDENT_CODE=ON
         -DCMAKE_CXX_FLAGS="-D_GLIBCXX_USE_CXX11_ABI=0"
+    )
+    RAMULATOR2_CMAKE_ARGS+=("${CMAKE_COMPAT_ARGS[@]}")
+    cmake "${RAMULATOR2_CMAKE_ARGS[@]}"
     make -C "$RAMULATOR2PATH/build" ramulator -j"$(nproc)"
     [[ -f "$RAMULATOR2_LIB" ]] && ok "libramulator2.so built" || err "Ramulator2 build failed. Expected: $RAMULATOR2_LIB"
 fi
