@@ -1,1 +1,0 @@
-../../../scripts/reproduce-full-grid.sh

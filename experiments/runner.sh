@@ -11,9 +11,19 @@ SCRIPT_REAL="$(python3 -c 'import os,sys; print(os.path.realpath(sys.argv[1]))' 
 SCRIPT_DIR="$(cd "$(dirname "$SCRIPT_REAL")" && pwd -P)"
 REPO_ROOT="$(cd "$SCRIPT_DIR/.." && pwd -P)"
 BENCH_ROOT="$REPO_ROOT/benchmarks"
+DAMOV_RUNNER="$SCRIPT_DIR/00-damov-native/scripts/runner.sh"
 
 export LANG=en_US.UTF-8
 export LC_ALL=en_US.UTF-8
+
+run_damov_native_runner() {
+  if [[ ! -f "$DAMOV_RUNNER" ]]; then
+    echo "Missing 00-damov-native runner at: $DAMOV_RUNNER" >&2
+    exit 1
+  fi
+
+  exec bash "$DAMOV_RUNNER" "$@"
+}
 
 resolve_experiment_dir() {
   local input="${1:-}"
@@ -33,6 +43,10 @@ resolve_experiment_dir() {
   exit 1
 }
 
+if [[ "${1:-}" == "00" || "${1:-}" == "00-damov-native" ]]; then
+  run_damov_native_runner "${@:2}"
+fi
+
 resolve_config_path() {
   local exp_dir="$1"
 
@@ -51,6 +65,10 @@ resolve_config_path() {
 }
 
 EXPERIMENT_DIR="$(resolve_experiment_dir "${1:-}")"
+if [[ "$(basename "$EXPERIMENT_DIR")" == "00-damov-native" ]]; then
+  run_damov_native_runner
+fi
+
 CONFIG_PATH="$(resolve_config_path "$EXPERIMENT_DIR")"
 CONFIG_NAME="$(basename "$CONFIG_PATH")"
 RUN_ONE_SCRIPT="$SCRIPT_DIR/run-one.sh"
