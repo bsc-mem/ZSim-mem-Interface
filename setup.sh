@@ -6,6 +6,7 @@
 #
 # Flags:
 #   --rebuild   Clean and force-rebuild all memory simulators and ZSim
+#   --build-damov   Build DAMOV native simulator only (requires root)
 #
 # What it does:
 #   1. Checks system dependencies (GCC, scons, Python packages, libconfig++)
@@ -17,9 +18,11 @@
 set -euo pipefail
 
 REBUILD=false
+BUILD_DAMOV=false
 for arg in "$@"; do
     case "$arg" in
         --rebuild) REBUILD=true ;;
+        --build-damov) BUILD_DAMOV=true ;;
         *) echo "Unknown argument: $arg"; exit 1 ;;
     esac
 done
@@ -36,6 +39,22 @@ step() { echo -e "\n${BLD}━━━  $*  ━━━━━━━━━━━━━
 # ── 0. Platform check ─────────────────────────────────────────────────────────
 if [[ "$(uname -s)" != "Linux" ]]; then
     err "This artifact requires Linux. Detected: $(uname -s)"
+fi
+
+if [[ "$BUILD_DAMOV" == true ]]; then
+    step "Building DAMOV native simulator only"
+    if [[ "$EUID" -ne 0 ]]; then
+        err "--build-damov requires root privileges. Run: sudo ./setup.sh --build-damov"
+    fi
+
+    DAMOV_BUILD_SCRIPT="$REPO_ROOT/experiments/00-damov-native/scripts/build.sh"
+    if [[ ! -x "$DAMOV_BUILD_SCRIPT" ]]; then
+        err "DAMOV build helper is missing or not executable: $DAMOV_BUILD_SCRIPT"
+    fi
+
+    "$DAMOV_BUILD_SCRIPT"
+    ok "DAMOV native simulator built successfully"
+    exit 0
 fi
 
 step "Step 1 / 5 — Checking system dependencies"
