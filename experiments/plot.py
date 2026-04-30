@@ -461,7 +461,7 @@ def extract_ramulator_core_latency(ram_path: str, ptr_core_id: int) -> float | N
                     return None
     return None
 
-def extract_ramulator_mem_bandwidth(ram_path: str) -> float | None:
+def extract_ramulator_mem_bandwidth(ram_path: str, config: Dict[str, str]) -> float | None:
     """
     Extract the total (read + write) memory bandwidth in Bps from Ramulator stats file.
     Returns None if file not found or values not present.
@@ -492,7 +492,11 @@ def extract_ramulator_mem_bandwidth(ram_path: str) -> float | None:
     if read_bw is None or write_bw is None:
         return None
 
-    return 6 * (read_bw + write_bw)  # Total bandwidth in Bps
+    channel_multiplier = cfg_int(config, "MEM_MAX_CHANNELS")
+    if channel_multiplier <= 0:
+        return None
+
+    return channel_multiplier * (read_bw + write_bw)
 
 
 def parse_ptrchase_mem_latency(
@@ -610,7 +614,7 @@ def parse_ramulator_mem_bandwidth(
         pause_value = int(tokens[2]) if len(
             tokens) > 2 and tokens[2].isdigit() else 0
         ram_path = os.path.join(measurement_root, name, ram_file)
-        mem_bandwidth = extract_ramulator_mem_bandwidth(ram_path)
+        mem_bandwidth = extract_ramulator_mem_bandwidth(ram_path, config)
         if mem_bandwidth is None:
             continue
         mem_bandwidth = mem_bandwidth # in bytes per second (TODO: check units)

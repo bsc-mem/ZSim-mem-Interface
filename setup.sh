@@ -6,7 +6,7 @@
 #
 # Flags:
 #   --rebuild   Clean and force-rebuild all memory simulators and ZSim
-#   --build-damov   Build DAMOV native simulator only
+#   --build-damov   Build DAMOV native simulator and experiment 00 benchmark only
 #
 # What it does:
 #   1. Checks system dependencies (GCC, scons, Python packages, libconfig++)
@@ -42,7 +42,7 @@ if [[ "$(uname -s)" != "Linux" ]]; then
 fi
 
 if [[ "$BUILD_DAMOV" == true ]]; then
-    step "Building DAMOV native simulator only"
+    step "Building DAMOV native simulator and experiment 00 benchmark"
 
     DAMOV_BUILD_SCRIPT="$REPO_ROOT/experiments/00-damov-native/scripts/build.sh"
     if [[ ! -x "$DAMOV_BUILD_SCRIPT" ]]; then
@@ -50,7 +50,7 @@ if [[ "$BUILD_DAMOV" == true ]]; then
     fi
 
     "$DAMOV_BUILD_SCRIPT"
-    ok "DAMOV native simulator built successfully"
+    ok "DAMOV native simulator and experiment 00 benchmark built successfully"
     exit 0
 fi
 

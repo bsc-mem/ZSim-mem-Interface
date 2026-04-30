@@ -9,6 +9,7 @@ BENCH_ROOT="$REPO_ROOT/benchmarks"
 
 export LANG=en_US.UTF-8
 export LC_ALL=en_US.UTF-8
+export OMP_NUM_THREADS=31
 
 find_damov_zsim_bin() {
   local candidate
@@ -36,16 +37,17 @@ fi
 
 CONFIG_TEMPLATE="$EXPERIMENT_DIR/configs/system.cfg"
 RAMULATOR_TEMPLATE="$EXPERIMENT_DIR/configs/DDR4-config.cfg"
+DAMOV_TRAFFIC_GEN="$EXPERIMENT_DIR/benchmarks/traffic_gen/traffic_gen.x"
 
 RWRATIO_MIN=0
 RWRATIO_MAX=100
 RWRATIO_STEP=10
 PAUSES="10000 2000 1000 0 5 10 15 20 25 30 35 40 45 50 55 60 65 70 80 90 100 120 140 160 180 200 220 260 300 340 380 450 550 600 700 800 900"
 
-for required in "$CONFIG_TEMPLATE" "$RAMULATOR_TEMPLATE" "$BENCH_ROOT/ptr_chase/ptr_chase" "$BENCH_ROOT/ptr_chase/array.dat" "$BENCH_ROOT/traffic_gen/traffic_gen.x"; do
+for required in "$CONFIG_TEMPLATE" "$RAMULATOR_TEMPLATE" "$BENCH_ROOT/ptr_chase/ptr_chase" "$BENCH_ROOT/ptr_chase/array.dat" "$DAMOV_TRAFFIC_GEN"; do
   if [[ ! -e "$required" ]]; then
     echo "Missing required file: $required" >&2
-    echo "Run ./scripts/build-benchmarks.sh from the repository root before using runner.sh." >&2
+    echo "Run ./setup.sh --build-damov from the repository root before using runner.sh." >&2
     exit 1
   fi
 done
@@ -84,7 +86,7 @@ PY
 
     cp "$BENCH_ROOT/ptr_chase/ptr_chase" "$run_dir/"
     cp "$BENCH_ROOT/ptr_chase/array.dat" "$run_dir/"
-    cp "$BENCH_ROOT/traffic_gen/traffic_gen.x" "$run_dir/"
+    cp "$DAMOV_TRAFFIC_GEN" "$run_dir/traffic_gen.x"
 
     (
       cd "$run_dir"
