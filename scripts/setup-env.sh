@@ -121,8 +121,9 @@ sys.exit(0 if zipfile.is_zipfile(sys.argv[1]) else 1)
 DRAMSIM3PATH="$REPO_ROOT/simulator-source/dramsim3/DRAMsim3"
 RAMULATORPATH="$REPO_ROOT/simulator-source/ramulator"
 RAMULATOR2PATH="$REPO_ROOT/simulator-source/ramulator2"
+DRAMSYSPATH="$REPO_ROOT/simulator-source/DRAMSys"
 
-for var_name in DRAMSIM3PATH RAMULATORPATH RAMULATOR2PATH; do
+for var_name in DRAMSIM3PATH RAMULATORPATH RAMULATOR2PATH DRAMSYSPATH; do
     path="${!var_name}"
     if [[ -d "$path" ]]; then
         ok "$var_name = $path"
@@ -261,6 +262,7 @@ export HDF5_HOME="$HDF5_HOME"
 export DRAMSIM3PATH="$DRAMSIM3PATH"
 export RAMULATORPATH="$RAMULATORPATH"
 export RAMULATOR2PATH="$RAMULATOR2PATH"
+export DRAMSYSPATH="$DRAMSYSPATH"
 EOF
 
 echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"

@@ -1,0 +1,10 @@
+Base {
+    global:
+        main;
+        ClientIntC;
+        CharmVersionC;
+        sc_main;
+
+    local:
+        *;
+};
