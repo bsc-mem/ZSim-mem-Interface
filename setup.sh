@@ -6,6 +6,7 @@
 #
 # Flags:
 #   --rebuild   Clean and force-rebuild all memory simulators and ZSim
+#   --build-damov   Build DAMOV native simulator and experiment 00 benchmark only
 #
 # What it does:
 #   1. Checks system dependencies (GCC, scons, Python packages, libconfig++)
@@ -17,9 +18,11 @@
 set -euo pipefail
 
 REBUILD=false
+BUILD_DAMOV=false
 for arg in "$@"; do
     case "$arg" in
         --rebuild) REBUILD=true ;;
+        --build-damov) BUILD_DAMOV=true ;;
         *) echo "Unknown argument: $arg"; exit 1 ;;
     esac
 done
@@ -36,6 +39,19 @@ step() { echo -e "\n${BLD}━━━  $*  ━━━━━━━━━━━━━
 # ── 0. Platform check ─────────────────────────────────────────────────────────
 if [[ "$(uname -s)" != "Linux" ]]; then
     err "This artifact requires Linux. Detected: $(uname -s)"
+fi
+
+if [[ "$BUILD_DAMOV" == true ]]; then
+    step "Building DAMOV native simulator and experiment 00 benchmark"
+
+    DAMOV_BUILD_SCRIPT="$REPO_ROOT/experiments/00-damov-native/scripts/build.sh"
+    if [[ ! -x "$DAMOV_BUILD_SCRIPT" ]]; then
+        err "DAMOV build helper is missing or not executable: $DAMOV_BUILD_SCRIPT"
+    fi
+
+    "$DAMOV_BUILD_SCRIPT"
+    ok "DAMOV native simulator and experiment 00 benchmark built successfully"
+    exit 0
 fi
 
 step "Step 1 / 5 — Checking system dependencies"
@@ -66,6 +82,14 @@ if command -v cmake &>/dev/null; then
     ok "cmake: $(cmake --version | head -1)"
 else
     err "cmake not found. Install it: sudo apt install cmake"
+fi
+
+cmake_major="$(cmake --version | awk 'NR==1 {split($3, v, "."); print v[1]}')"
+CMAKE_COMPAT_ARGS=()
+# CMake 4 removed compatibility with projects that still declare <3.5.
+if [[ "$cmake_major" =~ ^[0-9]+$ ]] && (( cmake_major >= 4 )); then
+    CMAKE_COMPAT_ARGS=(-DCMAKE_POLICY_VERSION_MINIMUM=3.5)
+    echo "  Detected CMake ${cmake_major}.x; enabling legacy policy compatibility for bundled projects."
 fi
 
 # libconfig++
@@ -122,10 +146,15 @@ if [[ -f "$DRAMSIM3_LIB" ]] && [[ "$REBUILD" == false ]]; then
 else
     echo "  Building DRAMsim3..."
     [[ "$REBUILD" == true ]] && rm -rf "$DRAMSIM3PATH/build" || true
-    cmake -S "$DRAMSIM3PATH" -B "$DRAMSIM3PATH/build" \
-        -DCMAKE_BUILD_TYPE=Release \
-        -DCMAKE_POSITION_INDEPENDENT_CODE=ON \
-        -DCMAKE_CXX_FLAGS="$OLD_ABI_CXXFLAG" 2>&1 | tail -3
+    DRAMSIM3_CMAKE_ARGS=(
+        -S "$DRAMSIM3PATH"
+        -B "$DRAMSIM3PATH/build"
+        -DCMAKE_BUILD_TYPE=Release
+        -DCMAKE_POSITION_INDEPENDENT_CODE=ON
+        -DCMAKE_CXX_FLAGS="-D_GLIBCXX_USE_CXX11_ABI=0"
+    )
+    DRAMSIM3_CMAKE_ARGS+=("${CMAKE_COMPAT_ARGS[@]}")
+    cmake "${DRAMSIM3_CMAKE_ARGS[@]}"
     make -C "$DRAMSIM3PATH/build" dramsim3 -j"$(nproc)"
     [[ -f "$DRAMSIM3_LIB" ]] && ok "libdramsim3.so built" || err "DRAMsim3 build failed."
 fi
@@ -137,10 +166,15 @@ if [[ -f "$RAMULATOR2_LIB" ]] && [[ "$REBUILD" == false ]]; then
 else
     echo "  Building Ramulator2 from: $RAMULATOR2PATH"
     [[ "$REBUILD" == true ]] && rm -rf "$RAMULATOR2PATH/build" || true
-    cmake -S "$RAMULATOR2PATH" -B "$RAMULATOR2PATH/build" \
-        -DCMAKE_BUILD_TYPE=Release \
-        -DCMAKE_POSITION_INDEPENDENT_CODE=ON \
-        -DCMAKE_CXX_FLAGS="$OLD_ABI_CXXFLAG"
+    RAMULATOR2_CMAKE_ARGS=(
+        -S "$RAMULATOR2PATH"
+        -B "$RAMULATOR2PATH/build"
+        -DCMAKE_BUILD_TYPE=Release
+        -DCMAKE_POSITION_INDEPENDENT_CODE=ON
+        -DCMAKE_CXX_FLAGS="-D_GLIBCXX_USE_CXX11_ABI=0"
+    )
+    RAMULATOR2_CMAKE_ARGS+=("${CMAKE_COMPAT_ARGS[@]}")
+    cmake "${RAMULATOR2_CMAKE_ARGS[@]}"
     make -C "$RAMULATOR2PATH/build" ramulator -j"$(nproc)"
     [[ -f "$RAMULATOR2_LIB" ]] && ok "libramulator2.so built" || err "Ramulator2 build failed. Expected: $RAMULATOR2_LIB"
 fi
