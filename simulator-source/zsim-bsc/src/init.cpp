@@ -421,7 +421,7 @@ MemObject* BuildMemoryController(Config& config, uint32_t lineSize, uint32_t fre
         g_vector<IBoundMemLatencyEstimator*> estimators;
         estimators.reserve(zinfo->numCores);
         for (uint32_t i = 0; i < zinfo->numCores; i++) {
-           estimators.push_back(createEstimator(estimatorType, latency));
+            estimators.push_back(createEstimator(estimatorType, latency));
         }
 
         mem = new Ramulator(name, domain, frequency, ramulatorConfig, estimators, zinfo->numCores, lineSize, pimMode, application, recordMemoryTrace, networkOverhead, trackedCores);

@@ -185,35 +185,27 @@ if [[ -n "${DRAMSYSPATH:-}" ]]; then
     DRAMSYS_LIB="$DRAMSYS_LIB_DIR/libdramsys.a"
     DRAMPOWER_LIB="$DRAMSYS_LIB_DIR/libDRAMPower.a"
     SYSTEMC_LIB="$DRAMSYS_LIB_DIR/libsystemc.a"
-    TRACE_ANALYZER_BIN="$DRAMSYSPATH/build/bin/TraceAnalyzer"
 
-    if [[ -f "$DRAMSYS_LIB" && -f "$DRAMPOWER_LIB" && -f "$SYSTEMC_LIB" && -x "$TRACE_ANALYZER_BIN" ]] && [[ "$REBUILD" == false ]]; then
+    if [[ -f "$DRAMSYS_LIB" && -f "$DRAMPOWER_LIB" && -f "$SYSTEMC_LIB" ]] && [[ "$REBUILD" == false ]]; then
         ok "DRAMSys libs and TraceAnalyzer already built"
     else
         echo "  Building DRAMSys from: $DRAMSYSPATH"
         [[ "$REBUILD" == true ]] && rm -rf "$DRAMSYSPATH/build" || true
-        PYBIND11_CMAKE_DIR="$(python3 -m pybind11 --cmakedir 2>/dev/null || true)"
         DRAMSYS_CMAKE_ARGS=(
             -DCMAKE_BUILD_TYPE=Release
             -DCMAKE_POSITION_INDEPENDENT_CODE=ON
             -DCMAKE_CXX_FLAGS="$OLD_ABI_CXXFLAG"
             -DDRAMSYS_BUILD_CLI=OFF
             -DDRAMSYS_BUILD_TOOLS=OFF
-            -DDRAMSYS_BUILD_TRACE_ANALYZER=ON
+            -DDRAMSYS_BUILD_TRACE_ANALYZER=OFF
         )
-        if [[ -n "$PYBIND11_CMAKE_DIR" && -d "$PYBIND11_CMAKE_DIR" ]]; then
-            DRAMSYS_CMAKE_ARGS+=(-Dpybind11_DIR="$PYBIND11_CMAKE_DIR")
-        else
-            warn "pybind11 CMake package not found from python3; TraceAnalyzer configure may fail."
-        fi
         cmake -S "$DRAMSYSPATH" -B "$DRAMSYSPATH/build" \
             "${DRAMSYS_CMAKE_ARGS[@]}"
         cmake --build "$DRAMSYSPATH/build" -j"$(nproc)"
-        if [[ -f "$DRAMSYS_LIB" && -f "$DRAMPOWER_LIB" && -f "$SYSTEMC_LIB" && -x "$TRACE_ANALYZER_BIN" ]]; then
+        if [[ -f "$DRAMSYS_LIB" && -f "$DRAMPOWER_LIB" && -f "$SYSTEMC_LIB" ]]; then
             ok "DRAMSys libs built (libdramsys.a, libDRAMPower.a, libsystemc.a)"
-            ok "TraceAnalyzer built: $TRACE_ANALYZER_BIN"
         else
-            err "DRAMSys build failed. Expected libs under: $DRAMSYS_LIB_DIR and TraceAnalyzer at $TRACE_ANALYZER_BIN"
+            err "DRAMSys build failed. Expected libs under: $DRAMSYS_LIB_DIR"
         fi
     fi
 else
